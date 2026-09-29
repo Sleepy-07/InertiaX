@@ -33,6 +33,10 @@ android {
     buildFeatures {
         compose = true
     }
+    // TFLite model must NOT be compressed so we can memory-map it
+    androidResources {
+        noCompress += listOf("tflite")
+    }
 }
 
 dependencies {
@@ -48,6 +52,11 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.google.gson)
+
+    // TensorFlow Lite — for KinoNet-R2 offline inference (Phase 3)
+    // 100% offline: model bundled in assets, no network calls
+    implementation(libs.tensorflow.lite)
+
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
