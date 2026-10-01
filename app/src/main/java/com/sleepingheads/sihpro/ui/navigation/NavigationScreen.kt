@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.sleepingheads.sihpro.ui.navigation.components.GoogleMapView
 import com.sleepingheads.sihpro.ui.navigation.components.TrajectoryView
 
 @Composable
@@ -36,6 +37,8 @@ fun NavigationScreen(
     val health = sample?.health ?: "NORMAL"
 
     val isBlackout = mode == "DEAD_RECKONING"
+    var showRouteMenu by remember { mutableStateOf(false) }
+    var useGoogleMaps by remember { mutableStateOf(true) }
 
     // Colors matching state
     val modeColor = when (mode) {
@@ -50,13 +53,23 @@ fun NavigationScreen(
             .fillMaxSize()
             .background(Color(0xFF0B0E14))
     ) {
-        // 1. Fullscreen Trajectory View
-        TrajectoryView(
-            allSamples = state.allSamples,
-            currentSample = sample,
-            metadata = state.metadata,
-            modifier = Modifier.fillMaxSize()
-        )
+        // 1. Fullscreen Navigation View (Google Maps SDK or 3D Trajectory Canvas)
+        if (useGoogleMaps) {
+            GoogleMapView(
+                allSamples = state.allSamples,
+                currentSample = sample,
+                currentSampleIndex = state.currentSampleIndex,
+                metadata = state.metadata,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            TrajectoryView(
+                allSamples = state.allSamples,
+                currentSample = sample,
+                metadata = state.metadata,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
         // 2. Top Header HUD Bar
         Column(
@@ -100,14 +113,79 @@ fun NavigationScreen(
                     }
                 }
 
-                // Diagnostics Button
-                IconButton(
-                    onClick = onNavigateToDiagnostics,
-                    modifier = Modifier
-                        .size(38.dp)
-                        .background(Color(0x22FFFFFF), CircleShape)
-                ) {
-                    Icon(Icons.Default.QueryStats, contentDescription = "Diagnostics", tint = Color(0xFF00E5FF), modifier = Modifier.size(20.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Route Switcher Dropdown
+                    Box {
+                        IconButton(
+                            onClick = { showRouteMenu = true },
+                            modifier = Modifier
+                                .size(38.dp)
+                                .background(Color(0x22FFFFFF), CircleShape)
+                        ) {
+                            Icon(Icons.Default.AltRoute, contentDescription = "Switch Route", tint = Color(0xFF00E676), modifier = Modifier.size(20.dp))
+                        }
+
+                        DropdownMenu(
+                            expanded = showRouteMenu,
+                            onDismissRequest = { showRouteMenu = false },
+                            modifier = Modifier.background(Color(0xFF161F2E))
+                        ) {
+                            viewModel.availableTrips.forEach { trip ->
+                                val isCurrent = trip.id == viewModel.selectedTrip.value.id
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                Text(
+                                                    text = trip.title,
+                                                    color = if (isCurrent) Color(0xFF00E676) else Color.White,
+                                                    fontSize = 13.sp,
+                                                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal
+                                                )
+                                                if (isCurrent) {
+                                                    Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF00E676), modifier = Modifier.size(14.dp))
+                                                }
+                                            }
+                                            Text(
+                                                text = "${trip.badge} • ${trip.scenarioType}",
+                                                color = Color(0xFF90A4AE),
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        viewModel.selectTrip(trip)
+                                        showRouteMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // View Toggle (Map vs 3D Procedural Canvas)
+                    IconButton(
+                        onClick = { useGoogleMaps = !useGoogleMaps },
+                        modifier = Modifier
+                            .size(38.dp)
+                            .background(Color(0x22FFFFFF), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = if (useGoogleMaps) Icons.Default.Layers else Icons.Default.Map,
+                            contentDescription = if (useGoogleMaps) "Switch to 3D Canvas" else "Switch to Google Maps",
+                            tint = if (useGoogleMaps) Color(0xFF00E5FF) else Color(0xFF00E676),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    // Diagnostics Button
+                    IconButton(
+                        onClick = onNavigateToDiagnostics,
+                        modifier = Modifier
+                            .size(38.dp)
+                            .background(Color(0x22FFFFFF), CircleShape)
+                    ) {
+                        Icon(Icons.Default.QueryStats, contentDescription = "Diagnostics", tint = Color(0xFF00E5FF), modifier = Modifier.size(20.dp))
+                    }
                 }
             }
 

@@ -15,3 +15,5 @@
 local.properties
 /dataset/
 dataset/
+__pycache__/
+*.pyc

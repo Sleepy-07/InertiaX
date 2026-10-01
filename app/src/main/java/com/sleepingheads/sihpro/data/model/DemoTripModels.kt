@@ -15,6 +15,9 @@ data class DemoPackage(
 data class TripMetadata(
     @SerializedName("tripId") val tripId: String,
     @SerializedName("title") val title: String,
+    @SerializedName("scenarioType") val scenarioType: String? = null,
+    @SerializedName("badge") val badge: String? = null,
+    @SerializedName("description") val description: String? = null,
     @SerializedName("sampleRateHz") val sampleRateHz: Int,
     @SerializedName("durationSec") val durationSec: Double,
     @SerializedName("sampleCount") val sampleCount: Int,
@@ -32,6 +35,19 @@ data class TripMetadata(
     @SerializedName("originLon") val originLon: Double,
     @SerializedName("modelVersion") val modelVersion: String,
     @SerializedName("dataType") val dataType: String
+)
+
+data class DemoTripInfo(
+    val id: String,
+    val title: String,
+    val scenarioType: String,
+    val badge: String,
+    val description: String,
+    val assetPath: String,
+    val outageDurationSec: Double,
+    val durationSec: Double,
+    val speedKmh: String,
+    val driftPercent: String
 )
 
 data class DemoEvent(

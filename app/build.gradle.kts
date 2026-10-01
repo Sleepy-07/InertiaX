@@ -1,7 +1,18 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
 }
+
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.inputStream().use { stream ->
+        localProperties.load(stream)
+    }
+}
+val mapsApiKey: String = localProperties.getProperty("MAPS_API_KEY") ?: ""
 
 android {
     namespace = "com.sleepingheads.sihpro"
@@ -17,6 +28,7 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
     }
 
     buildTypes {
@@ -56,6 +68,10 @@ dependencies {
     // TensorFlow Lite — for KinoNet-R2 offline inference (Phase 3)
     // 100% offline: model bundled in assets, no network calls
     implementation(libs.tensorflow.lite)
+
+    // Google Maps SDK for Android Compose
+    implementation(libs.maps.compose)
+    implementation(libs.play.services.maps)
 
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

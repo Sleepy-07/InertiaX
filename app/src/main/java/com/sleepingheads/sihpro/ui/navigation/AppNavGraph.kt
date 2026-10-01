@@ -21,6 +21,7 @@ fun AppNavGraph(
     ) {
         composable(Routes.HOME) {
             HomeScreen(
+                viewModel = sharedNavViewModel,
                 onStartDemo = {
                     sharedNavViewModel.restart()
                     navController.navigate(Routes.NAVIGATION)

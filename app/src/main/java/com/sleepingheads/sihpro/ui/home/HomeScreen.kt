@@ -1,7 +1,9 @@
 package com.sleepingheads.sihpro.ui.home
 
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -10,7 +12,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -21,21 +23,26 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.sleepingheads.sihpro.data.model.DemoTripInfo
+import com.sleepingheads.sihpro.ui.navigation.NavigationViewModel
 
 @Composable
 fun HomeScreen(
+    viewModel: NavigationViewModel,
     onStartDemo: () -> Unit,
     onViewResults: () -> Unit,
     onViewDiagnostics: () -> Unit
 ) {
     val scrollState = rememberScrollState()
+    val availableTrips = viewModel.availableTrips
+    val selectedTrip by viewModel.selectedTrip.collectAsState()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF0B0E14))
             .verticalScroll(scrollState)
-            .padding(horizontal = 20.dp, vertical = 40.dp),
+            .padding(horizontal = 20.dp, vertical = 36.dp),
         verticalArrangement = Arrangement.spacedBy(22.dp)
     ) {
         // App Identity Header
@@ -85,17 +92,55 @@ fun HomeScreen(
             }
         }
 
-        // Main Hero Launch Card
+        // Section Title: Route Selection
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "SELECT BENCHMARK SCENARIO ROUTE",
+                color = Color(0xFF90A4AE),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
+            Text(
+                text = "${availableTrips.size} Curated Trips",
+                color = Color(0xFF00E5FF),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
+        // Route Selection Window (List of curated trip cards)
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            availableTrips.forEach { trip ->
+                val isSelected = trip.id == selectedTrip.id
+                TripSelectionCard(
+                    trip = trip,
+                    isSelected = isSelected,
+                    onSelect = { viewModel.selectTrip(trip) }
+                )
+            }
+        }
+
+        // Active Demonstration Preview Card (Hero Launcher)
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF141A24)),
             shape = RoundedCornerShape(22.dp),
             border = CardDefaults.outlinedCardBorder().copy(
-                brush = Brush.linearGradient(listOf(Color(0xFF00E676), Color(0xFF00E5FF)))
+                brush = Brush.linearGradient(
+                    listOf(
+                        getBadgeColor(selectedTrip.badge),
+                        Color(0xFF00E5FF)
+                    )
+                )
             )
         ) {
             Column(
-                modifier = Modifier.padding(22.dp),
+                modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Row(
@@ -103,15 +148,30 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(getBadgeColor(selectedTrip.badge).copy(alpha = 0.2f))
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = selectedTrip.badge,
+                                color = getBadgeColor(selectedTrip.badge),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Text(
+                            text = selectedTrip.scenarioType,
+                            color = Color(0xFFB0BEC5),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
                     Text(
-                        text = "DEMONSTRATION RUN",
-                        color = Color(0xFF00E676),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    )
-                    Text(
-                        text = "40s Blackout",
+                        text = "${selectedTrip.outageDurationSec.toInt()}s Blackout",
                         color = Color(0xFFFF9100),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
@@ -120,13 +180,13 @@ fun HomeScreen(
 
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = "Delhi CP Expressway Tunnel Outage",
+                        text = selectedTrip.title,
                         color = Color.White,
-                        fontSize = 20.sp,
+                        fontSize = 19.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Watch the system seamlessly handle complete GNSS loss using KinoNet-R2 learned speed assistance and InEKF vehicle physics.",
+                        text = selectedTrip.description,
                         color = Color(0xFFB0BEC5),
                         fontSize = 13.sp,
                         lineHeight = 18.sp
@@ -138,9 +198,9 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    MiniStat("Outage Duration", "40.0 s")
-                    MiniStat("Outage Distance", "609.6 m")
-                    MiniStat("ISRO Target", "< 10.0%")
+                    MiniStat("Outage Duration", "${selectedTrip.outageDurationSec} s")
+                    MiniStat("Speed Profile", selectedTrip.speedKmh)
+                    MiniStat("Drift Verification", "${selectedTrip.driftPercent} (PASS)")
                 }
 
                 Button(
@@ -151,7 +211,12 @@ fun HomeScreen(
                 ) {
                     Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Start Live Demonstration", color = Color.Black, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "Start Simulation: ${selectedTrip.badge}",
+                        color = Color.Black,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
@@ -171,8 +236,8 @@ fun HomeScreen(
             )
 
             ActionTile(
-                title = "Previous Results",
-                subtitle = "ISRO Benchmark Scorecard",
+                title = "Benchmark Scorecard",
+                subtitle = "ISRO Target Verification",
                 icon = Icons.Default.Assessment,
                 accentColor = Color(0xFFFF9100),
                 onClick = onViewResults,
@@ -226,10 +291,109 @@ fun HomeScreen(
 }
 
 @Composable
+private fun TripSelectionCard(
+    trip: DemoTripInfo,
+    isSelected: Boolean,
+    onSelect: () -> Unit
+) {
+    val badgeColor = getBadgeColor(trip.badge)
+    val borderColor = if (isSelected) badgeColor else Color(0x22FFFFFF)
+    val bgColor = if (isSelected) Color(0xFF161F2E) else Color(0xFF12161F)
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onSelect() },
+        colors = CardDefaults.cardColors(containerColor = bgColor),
+        shape = RoundedCornerShape(14.dp),
+        border = CardDefaults.outlinedCardBorder().copy(
+            brush = Brush.horizontalGradient(
+                if (isSelected) listOf(badgeColor, Color(0xFF00E5FF)) else listOf(borderColor, borderColor)
+            )
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(14.dp)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Scenario Badge Icon / Pill
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(badgeColor.copy(alpha = if (isSelected) 0.25f else 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = when (trip.badge) {
+                            "FLAGSHIP" -> Icons.Default.AltRoute
+                            "MANEUVER" -> Icons.Default.TurnRight
+                            "ZUPT" -> Icons.Default.Traffic
+                            else -> Icons.Default.Speed
+                        },
+                        contentDescription = null,
+                        tint = badgeColor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = trip.title,
+                            color = if (isSelected) Color.White else Color(0xFFECEFF1),
+                            fontSize = 14.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
+                        )
+                    }
+
+                    Text(
+                        text = "${trip.scenarioType} • ${trip.speedKmh} • Drift: ${trip.driftPercent}",
+                        color = Color(0xFF90A4AE),
+                        fontSize = 11.sp
+                    )
+                }
+            }
+
+            // Radio / Checkbox Indicator
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(if (isSelected) badgeColor else Color(0x33FFFFFF)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isSelected) {
+                    Icon(Icons.Default.Check, contentDescription = "Selected", tint = Color.Black, modifier = Modifier.size(14.dp))
+                }
+            }
+        }
+    }
+}
+
+private fun getBadgeColor(badge: String): Color {
+    return when (badge.uppercase()) {
+        "FLAGSHIP" -> Color(0xFF00E676)
+        "MANEUVER" -> Color(0xFFE040FB)
+        "ZUPT" -> Color(0xFFFFAB00)
+        "HIGHWAY" -> Color(0xFF00E5FF)
+        else -> Color(0xFF00E676)
+    }
+}
+
+@Composable
 private fun MiniStat(label: String, value: String) {
     Column {
         Text(label, color = Color(0xFF78909C), fontSize = 10.sp)
-        Text(value, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Text(value, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
     }
 }
 
