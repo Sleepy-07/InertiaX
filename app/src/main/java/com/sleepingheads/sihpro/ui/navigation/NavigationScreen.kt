@@ -65,10 +65,11 @@ fun NavigationScreen(
                 .fillMaxWidth()
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(Color(0xE60B0E14), Color(0x990B0E14), Color.Transparent)
+                        colors = listOf(Color(0xF00B0E14), Color(0xBB0B0E14), Color.Transparent)
                     )
                 )
-                .padding(top = 40.dp, start = 16.dp, end = 16.dp, bottom = 12.dp)
+                .statusBarsPadding()
+                .padding(top = 8.dp, start = 16.dp, end = 16.dp, bottom = 10.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -253,9 +254,9 @@ fun NavigationScreen(
                         // Vertical Divider
                         Box(modifier = Modifier.width(1.dp).height(44.dp).background(Color(0x22FFFFFF)))
 
-                        // DRISHTI vs Naive INS Drift Comparison
+                        // GEORECKON vs Naive INS Drift Comparison
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("DRISHTI VS NAIVE", color = Color(0xFF64748B), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                            Text("GEORECKON VS NAIVE", color = Color(0xFF64748B), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                             Row(verticalAlignment = Alignment.Bottom) {
                                 Text(
                                     text = String.format("%.1f", sample?.errorM ?: 0.0),
@@ -275,7 +276,7 @@ fun NavigationScreen(
                                 Text(" m", color = Color(0xFF94A3B8), fontSize = 11.sp, modifier = Modifier.padding(bottom = 2.dp))
                             }
                             Text(
-                                text = if (isBlackout) "Drift Target < 10% ✅" else "Baseline Locked",
+                                text = if (isBlackout) "Cyan: AI Drift | Red: Naive" else "Cyan: AI Path | Red: Naive",
                                 color = if (isBlackout) Color(0xFF10B981) else Color(0xFF94A3B8),
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Medium

@@ -143,7 +143,7 @@ fun TrajectoryView(
                 )
             }
 
-            // 5. Draw DRISHTI Trajectory Driven So Far (Glowing Cyan)
+            // 5. Draw GeoReckon Trajectory Driven So Far (Glowing Cyan)
             if (currentIdx > 0) {
                 val drivenPath = Path().apply {
                     val p0 = toCanvas(allSamples[0].estX, allSamples[0].estY)
@@ -210,51 +210,55 @@ fun TrajectoryView(
             }
         }
 
-        // Top Legend HUD
+        // Top Legend HUD - positioned cleanly below the top navigation header
         Card(
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(12.dp),
+                .statusBarsPadding()
+                .padding(top = 115.dp, start = 14.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xD90C1220)),
-            shape = RoundedCornerShape(8.dp)
+            shape = RoundedCornerShape(8.dp),
+            border = CardDefaults.outlinedCardBorder().copy(brush = Brush.horizontalGradient(listOf(Color(0x3300F2FE), Color(0x22FFFFFF))))
         ) {
-            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Box(modifier = Modifier.size(12.dp, 3.dp).background(Color(0xFF10B981)))
-                    Text("GROUND TRUTH", fontSize = 10.sp, color = Color(0xFF94A3B8), fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                    Text("TRUE ROAD PATH", fontSize = 10.sp, color = Color(0xFF94A3B8), fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Box(modifier = Modifier.size(12.dp, 3.dp).background(Color(0xFF00F2FE)))
-                    Text("DRISHTI (AI + NHC + MAP)", fontSize = 10.sp, color = Color(0xFF00F2FE), fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                    Text("GEORECKON AI (CYAN)", fontSize = 10.sp, color = Color(0xFF00F2FE), fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Box(modifier = Modifier.size(12.dp, 3.dp).background(Color(0xFFEF4444)))
-                    Text("NAIVE INS DRIFT", fontSize = 10.sp, color = Color(0xFFEF4444), fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                    Text("NAIVE INS DRIFT (RED)", fontSize = 10.sp, color = Color(0xFFEF4444), fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                 }
             }
         }
 
-        // Floating GNSS Denied HUD during outage
+        // Floating GNSS Denied HUD during outage - positioned on the right below header
         if (currentSample?.mode == "DEAD_RECKONING") {
             Card(
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 12.dp),
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(top = 115.dp, end = 14.dp),
                 colors = CardDefaults.cardColors(containerColor = Color(0xE6B91C1C)),
-                shape = RoundedCornerShape(6.dp)
+                shape = RoundedCornerShape(8.dp),
+                border = CardDefaults.outlinedCardBorder().copy(brush = Brush.horizontalGradient(listOf(Color(0xFFEF4444), Color(0xFFFF9100))))
             ) {
-                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("⚠️ GNSS DENIED", fontSize = 12.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = Color.White)
-                    Text("ESTIMATED DRIFT: ${currentSample.errorM} m  |  NAIVE: ${currentSample.naiveErrorM} m", fontSize = 10.sp, color = Color(0xFFFECACA), fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), horizontalAlignment = Alignment.End) {
+                    Text("⚠️ GNSS OUTAGE ACTIVE", fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = Color.White)
+                    Text("AI DRIFT: ${String.format("%.1f", currentSample.errorM)}m | NAIVE: ${String.format("%.1f", currentSample.naiveErrorM)}m", fontSize = 10.sp, color = Color(0xFFFECACA), fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                 }
             }
         }
 
-        // Map Control Floating Buttons (Recenter, Zoom In, Zoom Out)
+        // Map Control Floating Buttons (Recenter, Zoom In, Zoom Out) - elevated above bottom telemetry card
         Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(16.dp),
+                .padding(bottom = 215.dp, end = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             FloatingActionButton(
