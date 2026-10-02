@@ -2,6 +2,7 @@ package com.sleepingheads.sihpro.ui.navigation.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -15,12 +16,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.*
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sleepingheads.sihpro.data.model.DemoSample
@@ -39,6 +44,12 @@ fun TrajectoryView(
     var scale by remember { mutableFloatStateOf(0.45f) }
     var panOffset by remember { mutableStateOf(Offset.Zero) }
     var autoFollow by remember { mutableStateOf(true) }
+
+    // Interactive Route Visibility Toggles for demonstration
+    var showGroundTruth by remember { mutableStateOf(true) }
+    var showAlgoTrajectory by remember { mutableStateOf(true) }
+    var showNaiveComparison by remember { mutableStateOf(true) }
+    val textMeasurer = rememberTextMeasurer()
 
     val originLat = metadata?.originLat ?: 28.6315
     val originLon = metadata?.originLon ?: 77.2167
@@ -102,7 +113,7 @@ fun TrajectoryView(
             }
 
             // 3. Draw Ground Truth Reference Path (Green)
-            if (allSamples.size >= 2) {
+            if (showGroundTruth && allSamples.size >= 2) {
                 val refPath = Path().apply {
                     val first = allSamples.first()
                     val p0 = toCanvas(first.trueX, first.trueY)
@@ -122,8 +133,8 @@ fun TrajectoryView(
 
             val currentIdx = allSamples.indexOf(currentSample).coerceAtLeast(0)
 
-            // 4. Draw Conventional Naive INS (Red - diverging wildly into the buildings)
-            if (currentIdx > 0) {
+            // 4. Draw Conventional Naive INS (Red - diverging off-road during outage)
+            if (showNaiveComparison && currentIdx > 0) {
                 val naivePath = Path().apply {
                     val p0 = toCanvas(allSamples[0].naiveX, allSamples[0].naiveY)
                     moveTo(p0.x, p0.y)
@@ -144,7 +155,7 @@ fun TrajectoryView(
             }
 
             // 5. Draw GeoReckon Trajectory Driven So Far (Glowing Cyan)
-            if (currentIdx > 0) {
+            if (showAlgoTrajectory && currentIdx > 0) {
                 val drivenPath = Path().apply {
                     val p0 = toCanvas(allSamples[0].estX, allSamples[0].estY)
                     moveTo(p0.x, p0.y)
@@ -161,7 +172,7 @@ fun TrajectoryView(
                 )
             }
 
-            // 6. Draw Vehicle Marker and Uncertainty Ellipse
+            // 6. Draw Vehicle Marker, Uncertainty Ellipse & Distinct Floating Badges
             if (currentSample != null) {
                 val vehiclePos = toCanvas(currentSample.estX, currentSample.estY)
                 val uncertaintyRadiusPx = (currentSample.uncertaintyM.toFloat() * scale).coerceAtLeast(10f)
@@ -189,28 +200,120 @@ fun TrajectoryView(
                 // Vehicle chevron oriented towards heading
                 drawVehicleChevron(vehiclePos, currentSample.headingDeg.toFloat(), accentColor)
 
-                // Naive INS position marker if in outage
-                if (currentSample.mode == "DEAD_RECKONING" && currentSample.naiveErrorM > 25.0) {
+                // Floating Callout Badge above GeoReckon Vehicle
+                val algoTag = if (currentSample.mode == "DEAD_RECKONING") {
+                    "⚡ GEORECKON AI · ${String.format("%.1f", currentSample.errorM)}m"
+                } else {
+                    "⚡ GEORECKON · GPS LOCK"
+                }
+                val algoMeasure = textMeasurer.measure(
+                    text = algoTag,
+                    style = TextStyle(
+                        color = Color(0xFF00F2FE),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                )
+                val pad = 5f
+                val abw = algoMeasure.size.width + pad * 2
+                val abh = algoMeasure.size.height + pad * 2
+                val abPos = Offset(vehiclePos.x - abw / 2f, vehiclePos.y - 32f)
+
+                drawRoundRect(
+                    color = Color(0xEE0A1220),
+                    topLeft = abPos,
+                    size = Size(abw, abh),
+                    cornerRadius = CornerRadius(4f, 4f)
+                )
+                drawRoundRect(
+                    color = Color(0xFF00F2FE),
+                    topLeft = abPos,
+                    size = Size(abw, abh),
+                    cornerRadius = CornerRadius(4f, 4f),
+                    style = Stroke(width = 1f)
+                )
+                drawText(
+                    textLayoutResult = algoMeasure,
+                    topLeft = Offset(abPos.x + pad, abPos.y + pad)
+                )
+
+                // Naive INS position marker if enabled and noticeable drift exists
+                if (showNaiveComparison && (currentSample.mode == "DEAD_RECKONING" || currentSample.naiveErrorM > 6.0)) {
                     val naivePt = toCanvas(currentSample.naiveX, currentSample.naiveY)
+
+                    // Line from vehicle to naive drift point
+                    drawLine(
+                        color = Color(0x88EF4444),
+                        start = vehiclePos,
+                        end = naivePt,
+                        strokeWidth = 2.0f,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f)
+                    )
+
+                    // Outer pulse ring
+                    drawCircle(
+                        color = Color(0x33EF4444),
+                        radius = 14f,
+                        center = naivePt,
+                        style = Fill
+                    )
+                    drawCircle(
+                        color = Color(0xFFEF4444),
+                        radius = 14f,
+                        center = naivePt,
+                        style = Stroke(width = 1.2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 4f), 0f))
+                    )
                     drawCircle(
                         color = Color(0xFFEF4444),
                         radius = 6f,
                         center = naivePt,
                         style = Fill
                     )
-                    // Line from vehicle to naive drift point
-                    drawLine(
-                        color = Color(0x66EF4444),
-                        start = vehiclePos,
-                        end = naivePt,
-                        strokeWidth = 1.5f,
-                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
+                    drawCircle(
+                        color = Color.White,
+                        radius = 2f,
+                        center = naivePt,
+                        style = Fill
+                    )
+
+                    // Floating Naive Badge
+                    val naiveTag = "⚠️ NAIVE INS · ${String.format("%.1f", currentSample.naiveErrorM)}m DRIFT"
+                    val naiveMeasure = textMeasurer.measure(
+                        text = naiveTag,
+                        style = TextStyle(
+                            color = Color(0xFFFF6B6B),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    )
+                    val nbw = naiveMeasure.size.width + pad * 2
+                    val nbh = naiveMeasure.size.height + pad * 2
+                    val nbPos = Offset(naivePt.x - nbw / 2f, naivePt.y + 16f)
+
+                    drawRoundRect(
+                        color = Color(0xEE1E0808),
+                        topLeft = nbPos,
+                        size = Size(nbw, nbh),
+                        cornerRadius = CornerRadius(4f, 4f)
+                    )
+                    drawRoundRect(
+                        color = Color(0xFFEF4444),
+                        topLeft = nbPos,
+                        size = Size(nbw, nbh),
+                        cornerRadius = CornerRadius(4f, 4f),
+                        style = Stroke(width = 1f)
+                    )
+                    drawText(
+                        textLayoutResult = naiveMeasure,
+                        topLeft = Offset(nbPos.x + pad, nbPos.y + pad)
                     )
                 }
             }
         }
 
-        // Top Legend HUD - positioned cleanly below the top navigation header
+        // Top Interactive Route Legend HUD (Tap any row to toggle route on/off)
         Card(
             modifier = Modifier
                 .align(Alignment.TopStart)
@@ -220,18 +323,49 @@ fun TrajectoryView(
             shape = RoundedCornerShape(8.dp),
             border = CardDefaults.outlinedCardBorder().copy(brush = Brush.horizontalGradient(listOf(Color(0x3300F2FE), Color(0x22FFFFFF))))
         ) {
-            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(modifier = Modifier.size(12.dp, 3.dp).background(Color(0xFF10B981)))
-                    Text("TRUE ROAD PATH", fontSize = 10.sp, color = Color(0xFF94A3B8), fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Ground Truth Toggle
+                Row(
+                    modifier = Modifier.clickable { showGroundTruth = !showGroundTruth },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(modifier = Modifier.size(12.dp, 3.dp).background(if (showGroundTruth) Color(0xFF10B981) else Color(0xFF334155)))
+                    Text(
+                        text = if (showGroundTruth) "✓ TRUE ROAD PATH" else "✕ TRUE ROAD (HIDDEN)",
+                        fontSize = 10.sp,
+                        color = if (showGroundTruth) Color(0xFF94A3B8) else Color(0xFF475569),
+                        fontFamily = FontFamily.Monospace
+                    )
                 }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(modifier = Modifier.size(12.dp, 3.dp).background(Color(0xFF00F2FE)))
-                    Text("GEORECKON AI (CYAN)", fontSize = 10.sp, color = Color(0xFF00F2FE), fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                // GeoReckon AI Algorithm Toggle
+                Row(
+                    modifier = Modifier.clickable { showAlgoTrajectory = !showAlgoTrajectory },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(modifier = Modifier.size(12.dp, 3.dp).background(if (showAlgoTrajectory) Color(0xFF00F2FE) else Color(0xFF334155)))
+                    Text(
+                        text = if (showAlgoTrajectory) "✓ GEORECKON AI (CYAN)" else "✕ GEORECKON (HIDDEN)",
+                        fontSize = 10.sp,
+                        color = if (showAlgoTrajectory) Color(0xFF00F2FE) else Color(0xFF475569),
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
                 }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(modifier = Modifier.size(12.dp, 3.dp).background(Color(0xFFEF4444)))
-                    Text("NAIVE INS DRIFT (RED)", fontSize = 10.sp, color = Color(0xFFEF4444), fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                // Naive INS Baseline Toggle
+                Row(
+                    modifier = Modifier.clickable { showNaiveComparison = !showNaiveComparison },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(modifier = Modifier.size(12.dp, 3.dp).background(if (showNaiveComparison) Color(0xFFEF4444) else Color(0xFF334155)))
+                    Text(
+                        text = if (showNaiveComparison) "✓ NAIVE INS DRIFT (RED)" else "✕ NAIVE INS (HIDDEN)",
+                        fontSize = 10.sp,
+                        color = if (showNaiveComparison) Color(0xFFEF4444) else Color(0xFF475569),
+                        fontFamily = FontFamily.Monospace
+                    )
                 }
             }
         }
@@ -248,13 +382,13 @@ fun TrajectoryView(
                 border = CardDefaults.outlinedCardBorder().copy(brush = Brush.horizontalGradient(listOf(Color(0xFFEF4444), Color(0xFFFF9100))))
             ) {
                 Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), horizontalAlignment = Alignment.End) {
-                    Text("⚠️ GNSS OUTAGE ACTIVE", fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = Color.White)
-                    Text("AI DRIFT: ${String.format("%.1f", currentSample.errorM)}m | NAIVE: ${String.format("%.1f", currentSample.naiveErrorM)}m", fontSize = 10.sp, color = Color(0xFFFECACA), fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                    Text("⚠️ GNSS OUTAGE ACTIVE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("AI DRIFT: ${String.format("%.1f", currentSample.errorM)}m | NAIVE: ${String.format("%.1f", currentSample.naiveErrorM)}m", fontSize = 10.sp, color = Color(0xFFFECACA), fontFamily = FontFamily.Monospace)
                 }
             }
         }
 
-        // Map Control Floating Buttons (Recenter, Zoom In, Zoom Out) - elevated above bottom telemetry card
+        // Map Control Floating Buttons (Recenter, Zoom In, Zoom Out)
         Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -289,26 +423,6 @@ fun TrajectoryView(
                 modifier = Modifier.size(44.dp)
             ) {
                 Icon(Icons.Default.Remove, contentDescription = "Zoom Out", modifier = Modifier.size(20.dp))
-            }
-        }
-
-        // Legend Badge
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(12.dp)
-                .background(Color(0xCC131924), RoundedCornerShape(8.dp))
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Box(modifier = Modifier.size(10.dp, 3.dp).background(Color(0xFF00E676)))
-                Text("Reference Path", color = Color(0xFFB0BEC5), fontSize = 11.sp)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Box(modifier = Modifier.size(10.dp, 3.dp).background(Color(0xFFFF9800)))
-                Text("Dead Reckoning", color = Color(0xFFB0BEC5), fontSize = 11.sp)
             }
         }
     }

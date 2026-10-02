@@ -629,6 +629,61 @@ function drawVehicleBeacon() {
   ctx.arc(pBase.x, pBase.y, 6, 0, Math.PI * 2);
   ctx.fill();
 
+  // Floating Badge above GeoReckon Vehicle
+  ctx.font = 'bold 11px Inter, sans-serif';
+  const algoText = `⚡ DRISHTI AI · ${cur.errorM.toFixed(1)}m`;
+  const textWidth = ctx.measureText(algoText).width;
+  ctx.fillStyle = 'rgba(10, 18, 32, 0.9)';
+  ctx.fillRect(pBase.x - textWidth / 2 - 6, pBase.y - 30, textWidth + 12, 18);
+  ctx.strokeStyle = '#00f2fe';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(pBase.x - textWidth / 2 - 6, pBase.y - 30, textWidth + 12, 18);
+  ctx.fillStyle = '#00f2fe';
+  ctx.fillText(algoText, pBase.x - textWidth / 2, pBase.y - 17);
+
+  // Naive INS Ghost Vehicle Marker if noticeable drift exists
+  if (cur.naiveErrorM > 6.0) {
+    const nBase = worldToScreen(cur.naiveX, cur.naiveY, 0);
+
+    // Connecting divergence line
+    ctx.strokeStyle = 'rgba(239, 68, 68, 0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(pBase.x, pBase.y);
+    ctx.lineTo(nBase.x, nBase.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Red ghost beacon
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.2)';
+    ctx.beginPath();
+    ctx.arc(nBase.x, nBase.y, 14, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(nBase.x, nBase.y, 14, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath();
+    ctx.arc(nBase.x, nBase.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Floating Naive Badge
+    const naiveText = `⚠️ NAIVE INS · ${cur.naiveErrorM.toFixed(0)}m DRIFT`;
+    const nWidth = ctx.measureText(naiveText).width;
+    ctx.fillStyle = 'rgba(30, 8, 8, 0.9)';
+    ctx.fillRect(nBase.x - nWidth / 2 - 6, nBase.y + 12, nWidth + 12, 18);
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(nBase.x - nWidth / 2 - 6, nBase.y + 12, nWidth + 12, 18);
+    ctx.fillStyle = '#ff6b6b';
+    ctx.fillText(naiveText, nBase.x - nWidth / 2, nBase.y + 25);
+  }
+
   ctx.restore();
 }
 
