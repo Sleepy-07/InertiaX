@@ -11,6 +11,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,7 +41,7 @@ fun NavigationScreen(
 
     val isBlackout = mode == "DEAD_RECKONING"
     var showRouteMenu by remember { mutableStateOf(false) }
-    var useGoogleMaps by remember { mutableStateOf(true) }
+    var useGoogleMaps by rememberSaveable { mutableStateOf(true) }
 
     // Colors matching state
     val modeColor = when (mode) {
@@ -53,8 +56,17 @@ fun NavigationScreen(
             .fillMaxSize()
             .background(Color(0xFF0B0E14))
     ) {
-        // 1. Fullscreen Navigation View (Google Maps SDK or 3D Trajectory Canvas)
-        if (useGoogleMaps) {
+        // 1. Fullscreen Navigation Views
+        // Keep GoogleMapView permanently in the composition so that switching between
+        // the 3D Trajectory Canvas and the Map preserves the loaded map tiles, OpenGL context,
+        // and vehicle camera tracking without reloading or re-zooming.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    alpha = if (useGoogleMaps) 1f else 0f
+                }
+        ) {
             GoogleMapView(
                 allSamples = state.allSamples,
                 currentSample = sample,
@@ -62,20 +74,28 @@ fun NavigationScreen(
                 metadata = state.metadata,
                 modifier = Modifier.fillMaxSize()
             )
-        } else {
-            TrajectoryView(
-                allSamples = state.allSamples,
-                currentSample = sample,
-                metadata = state.metadata,
-                modifier = Modifier.fillMaxSize()
-            )
         }
 
-        // 2. Top Header HUD Bar
+        // When in 3D Procedural Canvas mode, TrajectoryView overlays on top and intercepts gestures
+        if (!useGoogleMaps) {
+            Box(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                TrajectoryView(
+                    allSamples = state.allSamples,
+                    currentSample = sample,
+                    metadata = state.metadata,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+
+        // 2. Top Header HUD Bar (Back, Route Switcher, Layer Toggle, Diagnostics)
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
+                .zIndex(10f)
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(Color(0xF00B0E14), Color(0xBB0B0E14), Color.Transparent)
@@ -286,6 +306,7 @@ fun NavigationScreen(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
+                .zIndex(10f)
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(Color.Transparent, Color(0xCC0B0E14), Color(0xF20B0E14))
