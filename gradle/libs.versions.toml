@@ -10,6 +10,8 @@ kotlin = "2.2.10"
 composeBom = "2026.02.01"
 navigationCompose = "2.8.8"
 gson = "2.11.0"
+socketIo = "2.1.1"
+json = "20240303"
 tensorflowLite = "2.14.0"
 tensorflowLiteSupport = "0.5.0"
 mapsCompose = "4.4.1"
@@ -34,6 +36,8 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 google-gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
+socket-io-client = { group = "io.socket", name = "socket.io-client", version.ref = "socketIo" }
+json = { group = "org.json", name = "json", version.ref = "json" }
 tensorflow-lite = { group = "org.tensorflow", name = "tensorflow-lite", version.ref = "tensorflowLite" }
 maps-compose = { group = "com.google.maps.android", name = "maps-compose", version.ref = "mapsCompose" }
 play-services-maps = { group = "com.google.android.gms", name = "play-services-maps", version.ref = "playServicesMaps" }

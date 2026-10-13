@@ -64,6 +64,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.google.gson)
+    implementation(libs.socket.io.client)
 
     // TensorFlow Lite — for KinoNet-R2 offline inference (Phase 3)
     // 100% offline: model bundled in assets, no network calls

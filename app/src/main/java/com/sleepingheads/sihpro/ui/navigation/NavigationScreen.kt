@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.sleepingheads.sihpro.network.GeoReckonConnectionState
 import com.sleepingheads.sihpro.ui.navigation.components.GoogleMapView
 import com.sleepingheads.sihpro.ui.navigation.components.TrajectoryView
 
@@ -35,6 +36,11 @@ fun NavigationScreen(
     viewModel: NavigationViewModel = viewModel()
 ) {
     val state by viewModel.playbackState.collectAsState()
+    val isLiveCloudMode by viewModel.isLiveCloudMode.collectAsState()
+    val connState by viewModel.connectionState.collectAsState()
+    val lastRttMs by viewModel.lastRttMs.collectAsState()
+    val lastPosition by viewModel.lastPosition.collectAsState()
+
     val sample = state.currentSample
     val mode = sample?.mode ?: "INITIALIZING"
     val health = sample?.health ?: "NORMAL"
@@ -112,21 +118,26 @@ fun NavigationScreen(
                 // Back Button & App Title
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     IconButton(
-                        onClick = onNavigateBack,
+                        onClick = {
+                            if (isLiveCloudMode) {
+                                viewModel.startReplayMode()
+                            }
+                            onNavigateBack()
+                        },
                         modifier = Modifier.size(36.dp).background(Color(0x33FFFFFF), CircleShape)
                     ) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White, modifier = Modifier.size(18.dp))
                     }
                     Column {
                         Text(
-                            text = "GeoReckon",
+                            text = if (isLiveCloudMode) "AWS Cloud Live" else "GeoReckon",
                             color = Color.White,
                             fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.SansSerif
                         )
                         Text(
-                            text = state.metadata?.title ?: "Delhi CP Expressway",
+                            text = if (isLiveCloudMode) "EC2 KinoNet-R2 Python Daemon" else (state.metadata?.title ?: "Delhi CP Expressway"),
                             color = Color(0xFF90A4AE),
                             fontSize = 11.sp
                         )
@@ -269,6 +280,52 @@ fun NavigationScreen(
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
                 )
+            }
+
+            if (isLiveCloudMode) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF131D30))
+                        .border(1.dp, Color(0x5500E5FF), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .background(
+                                    if (connState == GeoReckonConnectionState.CONNECTED_IDLE || connState == GeoReckonConnectionState.DEAD_RECKONING) Color(0xFF00E676) else Color(0xFFFF9100),
+                                    CircleShape
+                                )
+                        )
+                        Text(
+                            text = "AWS WSS: ${connState.name}",
+                            color = Color(0xFF00E5FF),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text("•", color = Color(0xFF546E7A), fontSize = 10.sp)
+                        Text(
+                            text = "RTT ${lastRttMs.toInt()}ms",
+                            color = Color(0xFF90A4AE),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+
+                    Text(
+                        text = "AI: ${String.format("%.1f", (lastPosition?.kinonetSpeedMps ?: sample?.aiSpeedMps ?: 0.0) * 3.6)} km/h",
+                        color = Color(0xFF00E676),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
             }
 
             // Animated Blackout Dropdown Warning Banner
@@ -424,18 +481,45 @@ fun NavigationScreen(
                 }
             }
 
-            // Playback Progress Slider
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Slider(
-                    value = state.progress,
-                    onValueChange = { viewModel.seekTo(it) },
-                    modifier = Modifier.fillMaxWidth().height(24.dp),
-                    colors = SliderDefaults.colors(
-                        thumbColor = Color.White,
-                        activeTrackColor = modeColor,
-                        inactiveTrackColor = Color(0x33455A64)
+            // Progress / Live Telemetry Dispatch Indicator
+            if (isLiveCloudMode) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(modifier = Modifier.size(8.dp).background(Color(0xFF00E676), CircleShape))
+                        Text(
+                            text = "AWS CLOUD STREAM • 10 Hz DISPATCH",
+                            color = Color(0xFF00E5FF),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Text(
+                        text = "Packets: #${state.allSamples.size}",
+                        color = Color(0xFF90A4AE),
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace
                     )
-                )
+                }
+            } else {
+                // Playback Progress Slider
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Slider(
+                        value = state.progress,
+                        onValueChange = { viewModel.seekTo(it) },
+                        modifier = Modifier.fillMaxWidth().height(24.dp),
+                        colors = SliderDefaults.colors(
+                            thumbColor = Color.White,
+                            activeTrackColor = modeColor,
+                            inactiveTrackColor = Color(0x33455A64)
+                        )
+                    )
+                }
             }
 
             // Controls Row (Play/Pause, Speed Pills, Simulate Blackout, Results)
@@ -467,51 +551,70 @@ fun NavigationScreen(
                     }
                 }
 
-                // Speed Selector (1x, 2x, 5x)
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(Color(0xFF141A24))
-                        .padding(3.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    listOf(1.0f, 2.0f, 5.0f).forEach { speed ->
-                        val isSelected = state.speedMultiplier == speed
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(if (isSelected) Color(0xFF2C384E) else Color.Transparent)
-                                .clickable { viewModel.setSpeedMultiplier(speed) }
-                                .padding(horizontal = 9.dp, vertical = 5.dp)
-                        ) {
-                            Text(
-                                text = "${speed.toInt()}x",
-                                color = if (isSelected) Color(0xFF00E5FF) else Color(0xFF78909C),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                if (!isLiveCloudMode) {
+                    // Speed Selector (1x, 2x, 5x) for replay mode
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(Color(0xFF141A24))
+                            .padding(3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        listOf(1.0f, 2.0f, 5.0f).forEach { speed ->
+                            val isSelected = state.speedMultiplier == speed
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(if (isSelected) Color(0xFF2C384E) else Color.Transparent)
+                                    .clickable { viewModel.setSpeedMultiplier(speed) }
+                                    .padding(horizontal = 9.dp, vertical = 5.dp)
+                            ) {
+                                Text(
+                                    text = "${speed.toInt()}x",
+                                    color = if (isSelected) Color(0xFF00E5FF) else Color(0xFF78909C),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
+                    }
+                } else {
+                    // In cloud mode, display active model indicator pill
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Color(0xFF16233B))
+                            .border(1.dp, Color(0x4400E5FF), RoundedCornerShape(20.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = "KinoNet-R2 Cloud",
+                            color = Color(0xFF00E5FF),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
 
                 // Simulate Blackout Toggle Button
+                val isOutageActive = isBlackout || state.isManualBlackoutForced
                 FilledTonalButton(
-                    onClick = { viewModel.toggleManualBlackout() },
+                    onClick = { viewModel.toggleCloudBlackout() },
                     colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = if (state.isManualBlackoutForced) Color(0xFFFF5252) else Color(0xFF232D3F),
+                        containerColor = if (isOutageActive) Color(0xFFFF5252) else Color(0xFF232D3F),
                         contentColor = Color.White
                     ),
                     shape = RoundedCornerShape(12.dp),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                 ) {
                     Icon(
-                        if (state.isManualBlackoutForced) Icons.Default.GpsOff else Icons.Default.GpsFixed,
+                        if (isOutageActive) Icons.Default.GpsOff else Icons.Default.GpsFixed,
                         contentDescription = null,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        if (state.isManualBlackoutForced) "Cut GNSS" else "Sim Outage",
+                        if (isOutageActive) "Restore GNSS" else "Sim Outage",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
                     )

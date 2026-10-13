@@ -24,6 +24,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sleepingheads.sihpro.data.model.DemoTripInfo
+import com.sleepingheads.sihpro.network.BackendEnvironment
+import com.sleepingheads.sihpro.network.GeoReckonConnectionState
 import com.sleepingheads.sihpro.ui.navigation.NavigationViewModel
 
 @Composable
@@ -36,6 +38,9 @@ fun HomeScreen(
     val scrollState = rememberScrollState()
     val availableTrips = viewModel.availableTrips
     val selectedTrip by viewModel.selectedTrip.collectAsState()
+    val isLiveCloudMode by viewModel.isLiveCloudMode.collectAsState()
+    val connState by viewModel.connectionState.collectAsState()
+    val selectedBackend by viewModel.selectedBackend.collectAsState()
 
     Column(
         modifier = Modifier
@@ -77,18 +82,158 @@ fun HomeScreen(
                 )
             }
 
-            // Offline Status Chip
+            // Cloud / Offline Status Chip
+            val isOnlineActive = connState == GeoReckonConnectionState.CONNECTED_IDLE || connState == GeoReckonConnectionState.DEAD_RECKONING
+            val statusColor = if (isLiveCloudMode && isOnlineActive) Color(0xFF00E676) else if (isLiveCloudMode) Color(0xFFFF9100) else Color(0xFF00E5FF)
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(20.dp))
-                    .background(Color(0x2200E5FF))
-                    .border(1.dp, Color(0x6600E5FF), RoundedCornerShape(20.dp))
+                    .background(statusColor.copy(alpha = 0.15f))
+                    .border(1.dp, statusColor.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
                     .padding(horizontal = 10.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
-                Box(modifier = Modifier.size(7.dp).background(Color(0xFF00E5FF), CircleShape))
-                Text("100% Offline", color = Color(0xFF00E5FF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Box(modifier = Modifier.size(7.dp).background(statusColor, CircleShape))
+                Text(
+                    text = if (isLiveCloudMode) "AWS: ${connState.name}" else "100% Offline Edge",
+                    color = statusColor,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        // ── AWS Cloud Live Pipeline Hero Card ──────────────────────────────────────
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF131B2E)),
+            shape = RoundedCornerShape(22.dp),
+            border = CardDefaults.outlinedCardBorder().copy(
+                brush = Brush.horizontalGradient(
+                    listOf(Color(0xFF00E5FF), Color(0xFF00E676), Color(0xFF7C4DFF))
+                )
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0x3300E5FF)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.CloudQueue, contentDescription = null, tint = Color(0xFF00E5FF), modifier = Modifier.size(20.dp))
+                        }
+                        Column {
+                            Text(
+                                text = "AWS EC2 ONLINE NAVIGATION",
+                                color = Color(0xFF00E5FF),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 1.sp
+                            )
+                            Text(
+                                text = "Pure-Python Daemon • KinoNet-R2 Cloud Hosting",
+                                color = Color(0xFF90A4AE),
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0x3300E676))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "PRECONFIGURED",
+                            color = Color(0xFF00E676),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Text(
+                    text = "Streams real-time 10 Hz phone IMU vectors over WebSocket to the AWS EC2 hosted KinoNet-R2 neural network & InEKF engine. Full dead reckoning with zero manual configuration.",
+                    color = Color(0xFFCFD8DC),
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp
+                )
+
+                // Built-in backend target selection (zero manual typing required)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "BUILT-IN SERVER TARGET:",
+                        color = Color(0xFF78909C),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        BackendEnvironment.values().forEach { env ->
+                            val isSelected = selectedBackend == env
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (isSelected) Color(0xFF1E2C48) else Color(0xFF0E131E))
+                                    .border(
+                                        1.dp,
+                                        if (isSelected) Color(0xFF00E5FF) else Color(0x22FFFFFF),
+                                        RoundedCornerShape(10.dp)
+                                    )
+                                    .clickable { viewModel.switchBackend(env) }
+                                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = when (env) {
+                                        BackendEnvironment.AWS_EC2_CLOUD -> "AWS EC2 Cloud"
+                                        BackendEnvironment.LOCAL_EMULATOR -> "Emulator"
+                                        BackendEnvironment.LOCAL_DEVICE_REVERSE -> "USB Reverse"
+                                    },
+                                    color = if (isSelected) Color(0xFF00E5FF) else Color(0xFF90A4AE),
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // CTA Button: Launch AWS Live Cloud Navigation
+                Button(
+                    onClick = {
+                        viewModel.startLiveCloudMode()
+                        onStartDemo()
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
+                    modifier = Modifier.fillMaxWidth().height(50.dp)
+                ) {
+                    Icon(Icons.Default.CloudSync, contentDescription = null, tint = Color.Black)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Launch AWS Cloud Live Mode",
+                        color = Color.Black,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
 
@@ -99,7 +244,7 @@ fun HomeScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "SELECT BENCHMARK SCENARIO ROUTE",
+                text = "OR SELECT BENCHMARK SCENARIO ROUTE",
                 color = Color(0xFF90A4AE),
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -204,7 +349,10 @@ fun HomeScreen(
                 }
 
                 Button(
-                    onClick = onStartDemo,
+                    onClick = {
+                        viewModel.startReplayMode(selectedTrip)
+                        onStartDemo()
+                    },
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
                     modifier = Modifier.fillMaxWidth().height(52.dp)

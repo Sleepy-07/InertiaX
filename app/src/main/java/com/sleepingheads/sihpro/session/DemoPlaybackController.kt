@@ -49,6 +49,56 @@ class DemoPlaybackController(
         }
     }
 
+    fun initLiveCloudSession(title: String = "AWS EC2 Live Stream") {
+        playbackJob?.cancel()
+        _state.update {
+            it.copy(
+                isPlaying = true,
+                allSamples = emptyList(),
+                currentSampleIndex = 0,
+                currentSample = null,
+                metadata = TripMetadata(
+                    tripId = "aws_live_cloud",
+                    title = title,
+                    scenarioType = "AWS Cloud Live Dead Reckoning",
+                    badge = "AWS-LIVE",
+                    description = "Real-time 10 Hz telemetry connected to AWS EC2 pure-Python KinoNet-R2 server",
+                    sampleRateHz = 10,
+                    durationSec = 0.0,
+                    sampleCount = 0,
+                    outageStartSec = 0.0,
+                    outageEndSec = 0.0,
+                    outageDurationSec = 0.0,
+                    outageDistanceM = 0.0,
+                    endpointErrorM = 0.0,
+                    rmsErrorM = 0.0,
+                    maxErrorM = 0.0,
+                    driftPercent = 0.0,
+                    isroTargetPercent = 10.0,
+                    isroPassed = true,
+                    originLat = 12.9715987,
+                    originLon = 77.5945627,
+                    modelVersion = "KinoNet-R2 (AWS Cloud)",
+                    dataType = "Live Sensor WebSocket Stream"
+                ),
+                progress = 0f,
+                elapsedSec = 0f,
+                isCompleted = false
+            )
+        }
+    }
+
+    fun feedLiveSample(sample: DemoSample, history: List<DemoSample>) {
+        _state.update {
+            it.copy(
+                isPlaying = true,
+                currentSample = sample,
+                allSamples = history,
+                currentSampleIndex = (history.size - 1).coerceAtLeast(0)
+            )
+        }
+    }
+
     fun start() {
         if (_state.value.isPlaying) return
         if (_state.value.isCompleted) {
