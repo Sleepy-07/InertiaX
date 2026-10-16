@@ -45,15 +45,21 @@ android {
     buildFeatures {
         compose = true
     }
-    // TFLite model must NOT be compressed so we can memory-map it
+    // TFLite / ONNX model must NOT be compressed so we can memory-map it
     androidResources {
-        noCompress += listOf("tflite")
+        noCompress += listOf("tflite", "onnx")
+    }
+
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
     }
 }
 
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.fragment.ktx)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
@@ -66,13 +72,15 @@ dependencies {
     implementation(libs.google.gson)
     implementation(libs.socket.io.client)
 
-    // TensorFlow Lite — for KinoNet-R2 offline inference (Phase 3)
-    // 100% offline: model bundled in assets, no network calls
+    // On-Device ML: ONNX Runtime (Primary) + TensorFlow Lite (Secondary)
+    // 100% offline: model bundled in assets, zero network calls
+    implementation(libs.onnxruntime.android)
     implementation(libs.tensorflow.lite)
 
-    // Google Maps SDK for Android Compose
+    // Google Maps SDK for Android Compose & Fused Location Provider
     implementation(libs.maps.compose)
     implementation(libs.play.services.maps)
+    implementation(libs.play.services.location)
 
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

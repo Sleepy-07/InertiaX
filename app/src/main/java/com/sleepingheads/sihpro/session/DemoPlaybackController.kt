@@ -35,6 +35,7 @@ class DemoPlaybackController(
     private var playbackJob: Job? = null
 
     fun loadPackage(demoPackage: DemoPackage) {
+        playbackJob?.cancel()
         val samples = demoPackage.samples
         _state.update {
             it.copy(
@@ -44,6 +45,7 @@ class DemoPlaybackController(
                 currentSample = samples.firstOrNull(),
                 progress = 0f,
                 elapsedSec = 0f,
+                isPlaying = false,
                 isCompleted = false
             )
         }
@@ -90,17 +92,31 @@ class DemoPlaybackController(
 
     fun feedLiveSample(sample: DemoSample, history: List<DemoSample>) {
         _state.update {
+            val updatedMetadata = if (history.size <= 1) {
+                it.metadata?.copy(
+                    originLat = sample.trueLat,
+                    originLon = sample.trueLon,
+                    sampleCount = history.size
+                )
+            } else {
+                it.metadata?.copy(sampleCount = history.size)
+            }
+
             it.copy(
                 isPlaying = true,
                 currentSample = sample,
                 allSamples = history,
-                currentSampleIndex = (history.size - 1).coerceAtLeast(0)
+                currentSampleIndex = (history.size - 1).coerceAtLeast(0),
+                elapsedSec = history.size * 0.1f,
+                metadata = updatedMetadata
             )
         }
     }
 
     fun start() {
-        if (_state.value.isPlaying) return
+        val samples = _state.value.allSamples
+        if (samples.isEmpty()) return
+        if (playbackJob?.isActive == true && _state.value.isPlaying) return
         if (_state.value.isCompleted) {
             seekTo(0f)
         }
@@ -158,7 +174,10 @@ class DemoPlaybackController(
             while (isActive && _state.value.isPlaying) {
                 val currentIdx = _state.value.currentSampleIndex
                 val samples = _state.value.allSamples
-                if (samples.isEmpty()) break
+                if (samples.isEmpty()) {
+                    _state.update { it.copy(isPlaying = false) }
+                    break
+                }
 
                 if (currentIdx >= samples.size - 1) {
                     _state.update { it.copy(isPlaying = false, isCompleted = true) }

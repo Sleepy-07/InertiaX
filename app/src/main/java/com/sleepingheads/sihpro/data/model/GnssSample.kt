@@ -10,5 +10,6 @@ data class GnssSample(
     val longitude: Double,
     val speedMps: Double?,
     val accuracyM: Double?,
-    val valid: Boolean
+    val valid: Boolean,
+    val bearingDeg: Double? = null
 )

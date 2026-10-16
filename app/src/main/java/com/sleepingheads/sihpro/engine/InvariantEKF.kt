@@ -56,14 +56,27 @@ class InvariantEKF {
      * IMU prediction step (dead reckoning).
      * Python equivalent: [InvariantEKF.predict]
      */
-    fun predict(accel: DoubleArray, gyro: DoubleArray, dt: Double) {
+    fun predict(accel: DoubleArray, gyro: DoubleArray, dt: Double, isStationary: Boolean = false) {
+        if (isStationary) {
+            // Lock velocity and position completely when stationary
+            v[0] = 0.0; v[1] = 0.0; v[2] = 0.0
+            // Rotation is locked: do not allow gyro sensor noise to rotate R
+            return
+        }
+
         val omega = vec3Subtract(gyro, bG)
+        // Apply deadband on gyro noise to prevent angular drift while resting/straight
+        val omegaNorm = vec3Norm(omega)
+        if (omegaNorm < 0.025) { // < ~1.4 deg/sec is sensor noise floor
+            omega[0] = 0.0; omega[1] = 0.0; omega[2] = 0.0
+        }
+
         val aBody = vec3Subtract(accel, bA)
         val g = doubleArrayOf(0.0, 0.0, -GRAVITY)
 
         // Rotation update (Rodrigues)
         val angle = vec3Norm(omega) * dt
-        if (angle > 1e-10) {
+        if (angle > 1e-6) {
             val axis = vec3Scale(omega, 1.0 / vec3Norm(omega))
             val K = skew(axis)
             val sinA = sin(angle); val cosA = cos(angle)
@@ -109,7 +122,7 @@ class InvariantEKF {
         val IKH = buildIKH(K, Hpos)
         cov = mat15Add(
             mat15Mul(mat15Mul(IKH, cov), mat15Transpose(IKH)),
-            mat15Mul(mat15Mul(K, Rpos3ToFull(Rpos)), mat15Transpose(K))
+            buildKRKt3(K, Rpos)
         )
 
         if (gpsVel != null) updateVelocity(gpsVel)
@@ -174,7 +187,7 @@ class InvariantEKF {
         val IKH = buildZuptIKH(K, Hzupt)
         cov = mat15Add(
             mat15Mul(mat15Mul(IKH, cov), mat15Transpose(IKH)),
-            mat15Mul(mat15Mul(K, Rzupt3ToFull(Rzupt)), mat15Transpose(K))
+            buildKRKt3(K, Rzupt)
         )
     }
 
@@ -203,7 +216,24 @@ class InvariantEKF {
         cov = mat15Mul(IKH, cov)
     }
 
-    /** Tunnel wall clamp (Problem 8). */
+    /**
+     * Aligns horizontal yaw of R with true GPS bearing (degrees clockwise from North).
+     * Body X points forward: in ENU, East is X, North is Y.
+     * Bearing 0° = North (+Y), 90° = East (+X), 180° = South (-Y), 270° = West (-X).
+     */
+    fun alignHeading(bearingDeg: Double) {
+        val rad = Math.toRadians(bearingDeg)
+        val s = sin(rad)
+        val c = cos(rad)
+        // Body X = [s, c, 0], Body Y = [-c, s, 0], Body Z = [0, 0, 1]
+        R = doubleArrayOf(
+            s,   -c,  0.0,
+            c,    s,  0.0,
+            0.0, 0.0, 1.0
+        )
+    }
+
+    /** Tunnel wall clamp (Problem 8 - only for synthetic 1D benchmarks, not live navigation). */
     fun applyTunnelWall(roadWidthM: Double = 7.0) {
         val halfWidth = roadWidthM / 2.0
         if (abs(pos[1]) > halfWidth) pos[1] = sign(pos[1]) * halfWidth
@@ -307,7 +337,7 @@ class InvariantEKF {
         val IKH = buildIKH(K, Hvel)
         cov = mat15Add(
             mat15Mul(mat15Mul(IKH, cov), mat15Transpose(IKH)),
-            mat15Mul(mat15Mul(K, Rzupt3ToFull(Rvel)), mat15Transpose(K))
+            buildKRKt3(K, Rvel)
         )
     }
 
@@ -412,6 +442,14 @@ class InvariantEKF {
     }
 
     private fun buildZuptIKH(K: DoubleArray, H: DoubleArray) = buildIKH(K, H)
+
+    private fun buildKRKt3(K: DoubleArray, R3: DoubleArray): DoubleArray {
+        val KR = DoubleArray(45)
+        for (i in 0..14) for (j in 0..2) for (k in 0..2) KR[i * 3 + j] += K[i * 3 + k] * R3[k * 3 + j]
+        val out = DoubleArray(225)
+        for (i in 0..14) for (j in 0..14) for (k in 0..2) out[i * 15 + j] += KR[i * 3 + k] * K[j * 3 + k]
+        return out
+    }
 
     private fun buildNhcKRKt(K: DoubleArray, Rnhc: DoubleArray): DoubleArray {
         val KR = DoubleArray(30)

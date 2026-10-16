@@ -37,6 +37,7 @@ fun NavigationScreen(
 ) {
     val state by viewModel.playbackState.collectAsState()
     val isLiveCloudMode by viewModel.isLiveCloudMode.collectAsState()
+    val isLiveOfflineMode by viewModel.isLiveOfflineMode.collectAsState()
     val connState by viewModel.connectionState.collectAsState()
     val lastRttMs by viewModel.lastRttMs.collectAsState()
     val lastPosition by viewModel.lastPosition.collectAsState()
@@ -119,7 +120,7 @@ fun NavigationScreen(
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     IconButton(
                         onClick = {
-                            if (isLiveCloudMode) {
+                            if (isLiveCloudMode || isLiveOfflineMode) {
                                 viewModel.startReplayMode()
                             }
                             onNavigateBack()
@@ -130,14 +131,22 @@ fun NavigationScreen(
                     }
                     Column {
                         Text(
-                            text = if (isLiveCloudMode) "AWS Cloud Live" else "GeoReckon",
+                            text = when {
+                                isLiveOfflineMode -> "GeoReckon Edge AI"
+                                isLiveCloudMode -> "AWS Cloud Live"
+                                else -> "GeoReckon"
+                            },
                             color = Color.White,
                             fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.SansSerif
                         )
                         Text(
-                            text = if (isLiveCloudMode) "EC2 KinoNet-R2 Python Daemon" else (state.metadata?.title ?: "Delhi CP Expressway"),
+                            text = when {
+                                isLiveOfflineMode -> "100% On-Device • KinoNet-R2 Edge"
+                                isLiveCloudMode -> "EC2 KinoNet-R2 Python Daemon"
+                                else -> (state.metadata?.title ?: "Delhi CP Expressway")
+                            },
                             color = Color(0xFF90A4AE),
                             fontSize = 11.sp
                         )
@@ -145,16 +154,17 @@ fun NavigationScreen(
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Route Switcher Dropdown
-                    Box {
-                        IconButton(
-                            onClick = { showRouteMenu = true },
-                            modifier = Modifier
-                                .size(38.dp)
-                                .background(Color(0x22FFFFFF), CircleShape)
-                        ) {
-                            Icon(Icons.Default.AltRoute, contentDescription = "Switch Route", tint = Color(0xFF00E676), modifier = Modifier.size(20.dp))
-                        }
+                    // Route Switcher Dropdown (only for recorded benchmark trips)
+                    if (!isLiveCloudMode && !isLiveOfflineMode) {
+                        Box {
+                            IconButton(
+                                onClick = { showRouteMenu = true },
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .background(Color(0x22FFFFFF), CircleShape)
+                            ) {
+                                Icon(Icons.Default.AltRoute, contentDescription = "Switch Route", tint = Color(0xFF00E676), modifier = Modifier.size(20.dp))
+                            }
 
                         DropdownMenu(
                             expanded = showRouteMenu,
@@ -191,6 +201,7 @@ fun NavigationScreen(
                                 )
                             }
                         }
+                    }
                     }
 
                     // View Toggle (Map vs 3D Procedural Canvas)
@@ -482,7 +493,95 @@ fun NavigationScreen(
             }
 
             // Progress / Live Telemetry Dispatch Indicator
-            if (isLiveCloudMode) {
+            if (isLiveOfflineMode) {
+                // ── 100% On-Device Live Sensor Bar ──────────────────────────────
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(modifier = Modifier.size(8.dp).background(if (isBlackout) Color(0xFFFF9100) else Color(0xFF00E676), CircleShape))
+                        Text(
+                            text = if (isBlackout) "DEAD RECKONING • KINONET AI ACTIVE" else "LIVE ON-DEVICE SENSORS • 10 Hz",
+                            color = if (isBlackout) Color(0xFFFF9100) else Color(0xFF00E676),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Text(
+                        text = "Samples: #${state.allSamples.size}",
+                        color = Color(0xFF90A4AE),
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                // Live Navigation Action Bar (Zero/Recalibrate, Status, Exit)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Motion status / ZUPT indicator pill
+                    val isStopped = (sample?.speedKmh ?: 0.0) < 1.0
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isStopped) Color(0x3300E5FF) else Color(0x3300E676))
+                            .border(1.dp, if (isStopped) Color(0x6600E5FF) else Color(0x6600E676), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(
+                                if (isStopped) Icons.Default.PauseCircle else Icons.Default.DirectionsCar,
+                                contentDescription = null,
+                                tint = if (isStopped) Color(0xFF00E5FF) else Color(0xFF00E676),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = if (isStopped) "STOPPED • ZUPT LOCK" else "MOVING • ${String.format(java.util.Locale.US, "%.1f", sample?.speedKmh ?: 0.0)} km/h",
+                                color = if (isStopped) Color(0xFF00E5FF) else Color(0xFF00E676),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    // On-device control actions: Recalibrate Zero and Stop/Exit
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilledTonalButton(
+                            onClick = { viewModel.restart() },
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = Color(0xFF1E2638),
+                                contentColor = Color(0xFF00E5FF)
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Recalibrate", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
+                                viewModel.startReplayMode()
+                                onNavigateBack()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF263238)),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Default.Stop, contentDescription = null, tint = Color(0xFFFF5252), modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Exit Live", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            } else if (isLiveCloudMode) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -506,8 +605,72 @@ fun NavigationScreen(
                         fontFamily = FontFamily.Monospace
                     )
                 }
+
+                // Cloud Controls Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FilledIconButton(
+                        onClick = { viewModel.restart() },
+                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0xFF1E2638)),
+                        modifier = Modifier.size(46.dp)
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Restart", tint = Color.White)
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Color(0xFF16233B))
+                            .border(1.dp, Color(0x4400E5FF), RoundedCornerShape(20.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = "KinoNet-R2 Cloud",
+                            color = Color(0xFF00E5FF),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    val isOutageActive = isBlackout || state.isManualBlackoutForced
+                    FilledTonalButton(
+                        onClick = { viewModel.toggleCloudBlackout() },
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = if (isOutageActive) Color(0xFFFF5252) else Color(0xFF232D3F),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Icon(
+                            if (isOutageActive) Icons.Default.GpsOff else Icons.Default.GpsFixed,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            if (isOutageActive) "Restore GNSS" else "Sim Outage",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Button(
+                        onClick = onNavigateToResults,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                    ) {
+                        Text("Results", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(Icons.Default.Assessment, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                    }
+                }
             } else {
-                // Playback Progress Slider
+                // Playback Progress Slider (Replay mode only)
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Slider(
                         value = state.progress,
@@ -520,38 +683,36 @@ fun NavigationScreen(
                         )
                     )
                 }
-            }
 
-            // Controls Row (Play/Pause, Speed Pills, Simulate Blackout, Results)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Play / Pause & Restart
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilledIconButton(
-                        onClick = { viewModel.togglePlayPause() },
-                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary),
-                        modifier = Modifier.size(46.dp)
-                    ) {
-                        Icon(
-                            if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = "Play/Pause",
-                            tint = Color.Black
-                        )
+                // Controls Row (Play/Pause, Speed Pills, Simulate Blackout, Results) for Replay
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Play / Pause & Restart
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilledIconButton(
+                            onClick = { viewModel.togglePlayPause() },
+                            colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.size(46.dp)
+                        ) {
+                            Icon(
+                                if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = "Play/Pause",
+                                tint = Color.Black
+                            )
+                        }
+
+                        FilledIconButton(
+                            onClick = { viewModel.restart() },
+                            colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0xFF1E2638)),
+                            modifier = Modifier.size(46.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Restart", tint = Color.White)
+                        }
                     }
 
-                    FilledIconButton(
-                        onClick = { viewModel.restart() },
-                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0xFF1E2638)),
-                        modifier = Modifier.size(46.dp)
-                    ) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Restart", tint = Color.White)
-                    }
-                }
-
-                if (!isLiveCloudMode) {
                     // Speed Selector (1x, 2x, 5x) for replay mode
                     Row(
                         modifier = Modifier
@@ -578,58 +739,42 @@ fun NavigationScreen(
                             }
                         }
                     }
-                } else {
-                    // In cloud mode, display active model indicator pill
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(Color(0xFF16233B))
-                            .border(1.dp, Color(0x4400E5FF), RoundedCornerShape(20.dp))
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
+
+                    // Simulate Blackout Toggle Button
+                    val isOutageActive = isBlackout || state.isManualBlackoutForced
+                    FilledTonalButton(
+                        onClick = { viewModel.toggleCloudBlackout() },
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = if (isOutageActive) Color(0xFFFF5252) else Color(0xFF232D3F),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                     ) {
+                        Icon(
+                            if (isOutageActive) Icons.Default.GpsOff else Icons.Default.GpsFixed,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "KinoNet-R2 Cloud",
-                            color = Color(0xFF00E5FF),
+                            if (isOutageActive) "Restore GNSS" else "Sim Outage",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
-                }
 
-                // Simulate Blackout Toggle Button
-                val isOutageActive = isBlackout || state.isManualBlackoutForced
-                FilledTonalButton(
-                    onClick = { viewModel.toggleCloudBlackout() },
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = if (isOutageActive) Color(0xFFFF5252) else Color(0xFF232D3F),
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Icon(
-                        if (isOutageActive) Icons.Default.GpsOff else Icons.Default.GpsFixed,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        if (isOutageActive) "Restore GNSS" else "Sim Outage",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                // Results Button
-                Button(
-                    onClick = onNavigateToResults,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
-                ) {
-                    Text("Results", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Icon(Icons.Default.Assessment, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                    // Results Button
+                    Button(
+                        onClick = onNavigateToResults,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                    ) {
+                        Text("Results", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(Icons.Default.Assessment, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                    }
                 }
             }
         }

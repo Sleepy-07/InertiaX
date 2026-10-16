@@ -55,25 +55,10 @@ class PhoneAligner {
         }
 
         val n = accelBuffer.size
-        if (n < 20) return
+        if (n < 5) return
 
-        // --- Static detection (10-sample window around current) ---
-        val windowStart = maxOf(0, n - 20)
-        val window = accelBuffer.drop(windowStart)
-        val mags = window.map { a -> sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]) }
-        val variance = variance(mags.toDoubleArray())
-
-        val isStatic = variance < STATIC_THRESHOLD
-
-        if (isStatic && staticSegmentStart < 0) {
-            staticSegmentStart = n - 20
-        }
-
-        // Only calibrate once we have enough static data
-        val staticDuration = if (staticSegmentStart >= 0) n - staticSegmentStart else 0
-        if (staticDuration >= ALIGN_WINDOW && !firstMoveDetected) {
-            calibrateFromStaticSegment()
-        }
+        // Fast auto-leveling on first 5 samples so live navigation runs immediately without blocking
+        calibrateFromStaticSegment()
     }
 
     /**
@@ -109,16 +94,26 @@ class PhoneAligner {
         isCalibrated = true
     }
 
+    /**
+     * Slowly adapt gyro bias while stationary to cancel ongoing temperature/sensor drift.
+     */
+    fun updateGyroBiasStationary(gyroPhone: DoubleArray) {
+        val gyroVeh = matMul3(rPhoneToVehicle, gyroPhone)
+        for (i in 0..2) {
+            gyroBias[i] = gyroBias[i] * 0.98 + gyroVeh[i] * 0.02
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Private helpers
     // -----------------------------------------------------------------------
 
     private fun calibrateFromStaticSegment() {
-        val start = maxOf(0, staticSegmentStart)
+        val start = maxOf(0, staticSegmentStart.coerceAtLeast(0))
         val end = accelBuffer.size
 
-        val staticAccels = accelBuffer.drop(start).take(end - start)
-        val staticGyros = gyroBuffer.drop(start).take(end - start)
+        val staticAccels = accelBuffer.drop(start).take(end - start).ifEmpty { accelBuffer.toList() }
+        val staticGyros = gyroBuffer.drop(start).take(end - start).ifEmpty { gyroBuffer.toList() }
 
         if (staticAccels.isEmpty()) return
 
@@ -145,6 +140,8 @@ class PhoneAligner {
      */
     private fun gravityLeveling(fMean: DoubleArray): DoubleArray {
         val fx = fMean[0]; val fy = fMean[1]; val fz = fMean[2]
+        val norm = sqrt(fx * fx + fy * fy + fz * fz)
+        if (norm < 1.0) return identity3()
         val pitch = atan2(-fx, sqrt(fy * fy + fz * fz))
         val roll = atan2(fy, fz)
         // R_level = Ry(pitch) × Rx(roll)

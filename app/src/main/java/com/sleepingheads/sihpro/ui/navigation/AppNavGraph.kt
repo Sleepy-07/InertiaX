@@ -23,7 +23,6 @@ fun AppNavGraph(
             HomeScreen(
                 viewModel = sharedNavViewModel,
                 onStartDemo = {
-                    sharedNavViewModel.restart()
                     navController.navigate(Routes.NAVIGATION)
                 },
                 onViewResults = {

@@ -45,24 +45,52 @@ fun GoogleMapView(
     metadata: TripMetadata?,
     modifier: Modifier = Modifier
 ) {
-    if (allSamples.isEmpty() || currentSample == null) {
-        Box(
-            modifier = modifier.background(Color(0xFF0B0E14)),
-            contentAlignment = Alignment.Center
-        ) {
-            CircularProgressIndicator(color = Color(0xFF00E676))
-        }
-        return
+    val activeSample = currentSample ?: allSamples.lastOrNull() ?: remember {
+        DemoSample(
+            timestampMs = System.currentTimeMillis(),
+            trueLat = metadata?.originLat ?: 12.9715987,
+            trueLon = metadata?.originLon ?: 77.5945627,
+            trueX = 0.0, trueY = 0.0,
+            gpsLat = metadata?.originLat ?: 12.9715987,
+            gpsLon = metadata?.originLon ?: 77.5945627,
+            gnssAvailable = true,
+            estX = 0.0, estY = 0.0,
+            estLat = metadata?.originLat ?: 12.9715987,
+            estLon = metadata?.originLon ?: 77.5945627,
+            naiveX = 0.0, naiveY = 0.0, naiveErrorM = 0.0,
+            noAiX = 0.0, noAiY = 0.0, noAiErrorM = 0.0,
+            noNhcX = 0.0, noNhcY = 0.0, noNhcErrorM = 0.0,
+            noMapX = 0.0, noMapY = 0.0, noMapErrorM = 0.0,
+            speedMps = 0.0, speedKmh = 0.0, headingDeg = 0.0,
+            aiSpeedMps = 0.0, aiUncertainty = 0.05,
+            mode = "GNSS+INS", health = "NORMAL",
+            uncertaintyM = 1.8, alongUncertM = 1.8, crossUncertM = 1.4,
+            headingUncertDeg = 1.2, axisRatio = 1.2, errorM = 0.0,
+            accelX = 0.0, accelY = 0.0, accelZ = 9.80665,
+            gyroX = 0.0, gyroY = 0.0, gyroZ = 0.0
+        )
     }
+
+    val firstValidSample = remember(allSamples) {
+        allSamples.firstOrNull { !it.estLat.isNaN() && (it.estLat != 0.0 || it.estLon != 0.0) }
+    }
+    val originLat = firstValidSample?.estLat ?: metadata?.originLat ?: 28.6315
+    val originLon = firstValidSample?.estLon ?: metadata?.originLon ?: 77.2167
 
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var isPerspective3D by remember { mutableStateOf(true) }
-    val isBlackout = currentSample.mode == "DEAD_RECKONING"
+    val isBlackout = activeSample.mode == "DEAD_RECKONING"
+
+    // Safe coordinates fallback
+    val safeEstLat = if (activeSample.estLat.isNaN() || (activeSample.estLat == 0.0 && activeSample.estLon == 0.0)) originLat else activeSample.estLat
+    val safeEstLon = if (activeSample.estLon.isNaN() || (activeSample.estLat == 0.0 && activeSample.estLon == 0.0)) originLon else activeSample.estLon
+    val safeTrueLat = if (activeSample.trueLat.isNaN() || (activeSample.trueLat == 0.0 && activeSample.trueLon == 0.0)) originLat else activeSample.trueLat
+    val safeTrueLon = if (activeSample.trueLon.isNaN() || (activeSample.trueLat == 0.0 && activeSample.trueLon == 0.0)) originLon else activeSample.trueLon
 
     // Initial camera position centered on vehicle
     val initialPos = remember(metadata?.tripId) {
-        LatLng(currentSample.estLat, currentSample.estLon)
+        LatLng(safeEstLat, safeEstLon)
     }
 
     val cameraPositionState = rememberCameraPositionState(key = metadata?.tripId) {
@@ -70,17 +98,17 @@ fun GoogleMapView(
             .target(initialPos)
             .zoom(17.5f)
             .tilt(if (isPerspective3D) 45f else 0f)
-            .bearing(currentSample.headingDeg.toFloat())
+            .bearing(if (activeSample.headingDeg.isNaN()) 0f else activeSample.headingDeg.toFloat())
             .build()
     }
 
     // Force perfect zoom to vehicle location on startup or trip reset
     var hasSnappedInitial by remember(metadata?.tripId) { mutableStateOf(false) }
 
-    LaunchedEffect(metadata?.tripId, currentSampleIndex == 0) {
+    LaunchedEffect(metadata?.tripId, currentSampleIndex == 0, safeEstLat != originLat) {
         if (!hasSnappedInitial || currentSampleIndex == 0) {
-            val target = LatLng(currentSample.estLat, currentSample.estLon)
-            val bearing = currentSample.headingDeg.toFloat()
+            val target = LatLng(safeEstLat, safeEstLon)
+            val bearing = if (activeSample.headingDeg.isNaN()) 0f else activeSample.headingDeg.toFloat()
             val tilt = if (isPerspective3D) 45f else 0f
             cameraPositionState.move(
                 CameraUpdateFactory.newCameraPosition(
@@ -92,52 +120,83 @@ fun GoogleMapView(
                         .build()
                 )
             )
-            hasSnappedInitial = true
+            if (safeEstLat != originLat || currentSampleIndex > 0) {
+                hasSnappedInitial = true
+            }
         }
     }
 
-    // High performance real-time camera tracking:
-    // Using move() instead of animate() removes all frame queue lag and stutters at 10 Hz
-    LaunchedEffect(currentSample.timestampMs) {
-        if (hasSnappedInitial && currentSampleIndex > 0) {
-            val target = LatLng(currentSample.estLat, currentSample.estLon)
-            val bearing = currentSample.headingDeg.toFloat()
-            val tilt = if (isPerspective3D) 45f else 0f
-            val currentZoom = cameraPositionState.position.zoom.takeIf { it >= 10f } ?: 17.5f
+    val metersPerDegLat = 111320.0
+    val metersPerDegLon = metersPerDegLat * Math.cos(Math.toRadians(originLat))
 
-            cameraPositionState.move(
-                CameraUpdateFactory.newCameraPosition(
-                    CameraPosition.Builder()
-                        .target(target)
-                        .zoom(currentZoom)
-                        .tilt(tilt)
-                        .bearing(bearing)
-                        .build()
-                )
-            )
+    var lastCamTarget by remember { mutableStateOf<LatLng?>(null) }
+    var lastCamBearing by remember { mutableFloatStateOf(0f) }
+
+    // High performance real-time camera tracking with deadband stabilization:
+    // Using move() instead of animate() removes all frame queue lag and stutters at 10 Hz
+    LaunchedEffect(activeSample.timestampMs) {
+        val lat = activeSample.estLat
+        val lon = activeSample.estLon
+        if (lat.isNaN() || lon.isNaN() || (lat == 0.0 && lon == 0.0)) return@LaunchedEffect
+
+        val target = LatLng(lat, lon)
+        val bearing = if (activeSample.headingDeg.isNaN()) 0f else activeSample.headingDeg.toFloat()
+        val tilt = if (isPerspective3D) 45f else 0f
+        val currentZoom = cameraPositionState.position.zoom.takeIf { it >= 10f } ?: 17.5f
+
+        // When stationary on a table or stopped in traffic, do NOT issue continuous camera moves!
+        // This prevents 10 Hz camera stutter and rotating horizon while at a standstill.
+        val isStopped = activeSample.speedKmh < 1.5
+        val prevTarget = lastCamTarget
+        if (prevTarget != null && isStopped) {
+            return@LaunchedEffect
         }
+
+        if (prevTarget != null) {
+            val dLatM = (target.latitude - prevTarget.latitude) * metersPerDegLat
+            val dLonM = (target.longitude - prevTarget.longitude) * metersPerDegLon
+            val distM = Math.hypot(dLatM, dLonM)
+            var bDiff = Math.abs(bearing - lastCamBearing) % 360f
+            if (bDiff > 180f) bDiff = 360f - bDiff
+
+            // Deadband: skip moving camera if movement is sub-decimeter and angle change is tiny
+            if (distM < 0.4 && bDiff < 1.5f) {
+                return@LaunchedEffect
+            }
+        }
+
+        lastCamTarget = target
+        lastCamBearing = bearing
+
+        cameraPositionState.move(
+            CameraUpdateFactory.newCameraPosition(
+                CameraPosition.Builder()
+                    .target(target)
+                    .zoom(currentZoom)
+                    .tilt(tilt)
+                    .bearing(bearing)
+                    .build()
+            )
+        )
     }
 
     // Precalculate all LatLng polylines once to prevent garbage collection lag during 10 Hz ticks
     val truePathPoints = remember(allSamples) {
-        allSamples.map { LatLng(it.trueLat, it.trueLon) }
+        allSamples.filter { !it.trueLat.isNaN() && !it.trueLon.isNaN() && (it.trueLat != 0.0 || it.trueLon != 0.0) }
+            .map { LatLng(it.trueLat, it.trueLon) }
     }
 
     val allEstPoints = remember(allSamples) {
-        allSamples.map { LatLng(it.estLat, it.estLon) }
+        allSamples.filter { !it.estLat.isNaN() && !it.estLon.isNaN() && (it.estLat != 0.0 || it.estLon != 0.0) }
+            .map { LatLng(it.estLat, it.estLon) }
     }
 
-    val originLat = metadata?.originLat ?: 28.6315
-    val originLon = metadata?.originLon ?: 77.2167
-    val metersPerDegLat = 111320.0
-    val metersPerDegLon = metersPerDegLat * Math.cos(Math.toRadians(originLat))
+    val naiveLat = if (metersPerDegLat > 0) originLat + (activeSample.naiveY / metersPerDegLat) else originLat
+    val naiveLon = if (metersPerDegLon > 0) originLon + (activeSample.naiveX / metersPerDegLon) else originLon
+    val safeNaivePos = if (naiveLat.isNaN() || naiveLon.isNaN()) LatLng(originLat, originLon) else LatLng(naiveLat, naiveLon)
 
-    val naiveLat = originLat + (currentSample.naiveY / metersPerDegLat)
-    val naiveLon = originLon + (currentSample.naiveX / metersPerDegLon)
-    val naivePos = LatLng(naiveLat, naiveLon)
-
-    val allNaivePoints = remember(allSamples, metadata) {
-        allSamples.map {
+    val allNaivePoints = remember(allSamples, originLat, originLon) {
+        allSamples.filter { !it.naiveY.isNaN() && !it.naiveX.isNaN() }.map {
             LatLng(
                 originLat + (it.naiveY / metersPerDegLat),
                 originLon + (it.naiveX / metersPerDegLon)
@@ -167,23 +226,23 @@ fun GoogleMapView(
 
     // Persistent MarkerStates updated in-place to prevent destroying/recreating native markers each frame
     val carMarkerState = rememberMarkerState(
-        position = LatLng(currentSample.estLat, currentSample.estLon)
+        position = LatLng(safeEstLat, safeEstLon)
     )
     val naiveMarkerState = rememberMarkerState(
-        position = naivePos
+        position = safeNaivePos
     )
     val trueGpsMarkerState = rememberMarkerState(
-        position = LatLng(currentSample.trueLat, currentSample.trueLon)
+        position = LatLng(safeTrueLat, safeTrueLon)
     )
 
-    LaunchedEffect(currentSample.estLat, currentSample.estLon) {
-        carMarkerState.position = LatLng(currentSample.estLat, currentSample.estLon)
+    LaunchedEffect(safeEstLat, safeEstLon) {
+        carMarkerState.position = LatLng(safeEstLat, safeEstLon)
     }
-    LaunchedEffect(naiveLat, naiveLon) {
-        naiveMarkerState.position = naivePos
+    LaunchedEffect(safeNaivePos) {
+        naiveMarkerState.position = safeNaivePos
     }
-    LaunchedEffect(currentSample.trueLat, currentSample.trueLon) {
-        trueGpsMarkerState.position = LatLng(currentSample.trueLat, currentSample.trueLon)
+    LaunchedEffect(safeTrueLat, safeTrueLon) {
+        trueGpsMarkerState.position = LatLng(safeTrueLat, safeTrueLon)
     }
 
     // Custom marker icons
@@ -208,10 +267,17 @@ fun GoogleMapView(
         )
     }
 
-    val mapProperties = remember {
+    val hasLocationPermission = remember {
+        androidx.core.content.ContextCompat.checkSelfPermission(
+            context, android.Manifest.permission.ACCESS_FINE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+
+    val mapProperties = remember(hasLocationPermission) {
         MapProperties(
             isBuildingEnabled = true,
             isTrafficEnabled = false,
+            isMyLocationEnabled = hasLocationPermission,
             mapStyleOptions = MapStyleOptions(DARK_NAVIGATION_MAP_STYLE)
         )
     }
@@ -248,7 +314,7 @@ fun GoogleMapView(
             }
 
             // 3. Naive INS Drifting Trajectory Path (Dashed Crimson Red)
-            if (naiveTraversedPoints.isNotEmpty() && (isBlackout || currentSample.naiveErrorM > 4.0)) {
+            if (naiveTraversedPoints.isNotEmpty() && (isBlackout || activeSample.naiveErrorM > 4.0)) {
                 Polyline(
                     points = naiveTraversedPoints,
                     color = Color(0x99EF4444),
@@ -270,18 +336,19 @@ fun GoogleMapView(
             }
 
             // 5. Uncertainty Covariance Circle around estimated vehicle position
+            val circleRadius = if (activeSample.uncertaintyM.isNaN()) 2.0 else activeSample.uncertaintyM.coerceIn(1.5, 200.0)
             Circle(
-                center = LatLng(currentSample.estLat, currentSample.estLon),
-                radius = currentSample.uncertaintyM.coerceAtLeast(1.5),
+                center = LatLng(safeEstLat, safeEstLon),
+                radius = circleRadius,
                 strokeColor = if (isBlackout) Color(0xFFFF9100) else Color(0xFF00E5FF),
                 strokeWidth = 3f,
                 fillColor = (if (isBlackout) Color(0x22FF9100) else Color(0x1800E5FF))
             )
 
             // 6. Drift vector line from GeoReckon vehicle to Naive drift position
-            if (isBlackout || currentSample.naiveErrorM > 4.0) {
+            if (isBlackout || activeSample.naiveErrorM > 4.0) {
                 Polyline(
-                    points = listOf(LatLng(currentSample.estLat, currentSample.estLon), naivePos),
+                    points = listOf(LatLng(safeEstLat, safeEstLon), safeNaivePos),
                     color = Color(0xAAEF4444),
                     width = 4f,
                     pattern = listOf(Dash(14f), Gap(8f))
@@ -291,7 +358,7 @@ fun GoogleMapView(
                 Marker(
                     state = naiveMarkerState,
                     title = "⚠️ Naive INS Drift",
-                    snippet = "Uncorrected Error: ${String.format("%.1f", currentSample.naiveErrorM)}m",
+                    snippet = "Uncorrected Error: ${String.format(java.util.Locale.US, "%.1f", activeSample.naiveErrorM)}m",
                     anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.5f),
                     flat = false,
                     icon = naiveIcon
@@ -303,7 +370,7 @@ fun GoogleMapView(
                 Marker(
                     state = trueGpsMarkerState,
                     title = "True GNSS Position",
-                    snippet = "GeoReckon Error: ${String.format("%.1f", currentSample.errorM)}m",
+                    snippet = "GeoReckon Error: ${String.format(java.util.Locale.US, "%.1f", activeSample.errorM)}m",
                     anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.5f),
                     flat = false,
                     icon = trueGpsIcon
@@ -313,9 +380,9 @@ fun GoogleMapView(
             // 8. Custom GeoReckon Car Marker (Oriented top-down sports car)
             Marker(
                 state = carMarkerState,
-                title = "GeoReckon AI (${currentSample.speedKmh.toInt()} km/h)",
-                snippet = "Mode: ${currentSample.mode} • Uncertainty: ±${String.format("%.1f", currentSample.uncertaintyM)}m",
-                rotation = currentSample.headingDeg.toFloat(),
+                title = "GeoReckon AI (${activeSample.speedKmh.toInt()} km/h)",
+                snippet = "Mode: ${activeSample.mode} • Uncertainty: ±${String.format(java.util.Locale.US, "%.1f", circleRadius)}m",
+                rotation = if (activeSample.headingDeg.isNaN()) 0f else activeSample.headingDeg.toFloat(),
                 anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.5f),
                 flat = true,
                 icon = carIcon
@@ -351,10 +418,10 @@ fun GoogleMapView(
                         cameraPositionState.move(
                             CameraUpdateFactory.newCameraPosition(
                                 CameraPosition.Builder()
-                                    .target(LatLng(currentSample.estLat, currentSample.estLon))
+                                    .target(LatLng(activeSample.estLat, activeSample.estLon))
                                     .zoom(17.5f)
                                     .tilt(if (isPerspective3D) 45f else 0f)
-                                    .bearing(currentSample.headingDeg.toFloat())
+                                    .bearing(activeSample.headingDeg.toFloat())
                                     .build()
                             )
                         )

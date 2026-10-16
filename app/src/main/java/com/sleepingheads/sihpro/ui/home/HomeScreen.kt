@@ -38,6 +38,7 @@ fun HomeScreen(
     val scrollState = rememberScrollState()
     val availableTrips = viewModel.availableTrips
     val selectedTrip by viewModel.selectedTrip.collectAsState()
+    val isLiveOfflineMode by viewModel.isLiveOfflineMode.collectAsState()
     val isLiveCloudMode by viewModel.isLiveCloudMode.collectAsState()
     val connState by viewModel.connectionState.collectAsState()
     val selectedBackend by viewModel.selectedBackend.collectAsState()
@@ -84,7 +85,17 @@ fun HomeScreen(
 
             // Cloud / Offline Status Chip
             val isOnlineActive = connState == GeoReckonConnectionState.CONNECTED_IDLE || connState == GeoReckonConnectionState.DEAD_RECKONING
-            val statusColor = if (isLiveCloudMode && isOnlineActive) Color(0xFF00E676) else if (isLiveCloudMode) Color(0xFFFF9100) else Color(0xFF00E5FF)
+            val statusColor = when {
+                isLiveOfflineMode -> Color(0xFF00E676)
+                isLiveCloudMode && isOnlineActive -> Color(0xFF00E676)
+                isLiveCloudMode -> Color(0xFFFF9100)
+                else -> Color(0xFF00E5FF)
+            }
+            val statusText = when {
+                isLiveOfflineMode -> "Live Edge: ${viewModel.offlineEngine.activeModelEngine}"
+                isLiveCloudMode -> "AWS: ${connState.name}"
+                else -> "Offline Edge Ready"
+            }
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(20.dp))
@@ -96,11 +107,174 @@ fun HomeScreen(
             ) {
                 Box(modifier = Modifier.size(7.dp).background(statusColor, CircleShape))
                 Text(
-                    text = if (isLiveCloudMode) "AWS: ${connState.name}" else "100% Offline Edge",
+                    text = statusText,
                     color = statusColor,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
                 )
+            }
+        }
+
+        // ── 100% On-Device Live Sensor Navigation Card ─────────────────────────────
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0E1A16)),
+            shape = RoundedCornerShape(22.dp),
+            border = CardDefaults.outlinedCardBorder().copy(
+                brush = Brush.horizontalGradient(
+                    listOf(Color(0xFF00E676), Color(0xFF00E5FF), Color(0xFF69F0AE))
+                )
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0x3300E676)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Sensors, contentDescription = null, tint = Color(0xFF00E676), modifier = Modifier.size(20.dp))
+                        }
+                        Column {
+                            Text(
+                                text = "100% ON-DEVICE LIVE SENSORS",
+                                color = Color(0xFF00E676),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 1.sp
+                            )
+                            Text(
+                                text = "Hardware IMU • KinoNet-R2 Edge AI Engine",
+                                color = Color(0xFF90A4AE),
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0x3300E676))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "NO SERVER NEEDED",
+                            color = Color(0xFF00E676),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Text(
+                    text = "Reads your phone's real accelerometer & gyroscope directly, runs KinoNet-R2 on-device via native ${viewModel.offlineEngine.activeModelEngine}, and performs Invariant EKF dead reckoning completely offline.",
+                    color = Color(0xFFCFD8DC),
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp
+                )
+
+                // Feature Highlights
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF14241E))
+                            .padding(8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("10 Hz IMU Loop", color = Color(0xFF81C784), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF14241E))
+                            .padding(8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("Auto Tilt Aligner", color = Color(0xFF81C784), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF14241E))
+                            .padding(8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("ZUPT & NHC Filter", color = Color(0xFF81C784), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                    androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+                ) { permissions ->
+                    val fineGranted = permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] ?: false
+                    val coarseGranted = permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
+                    if (fineGranted || coarseGranted) {
+                        try {
+                            viewModel.startLiveOfflineMode()
+                            onStartDemo()
+                        } catch (t: Throwable) {
+                            android.util.Log.e("HomeScreen", "Error launching live navigation: ${t.message}", t)
+                        }
+                    }
+                }
+
+                // CTA Button: Launch On-Device Live Mode
+                Button(
+                    onClick = {
+                        val hasFine = androidx.core.content.ContextCompat.checkSelfPermission(
+                            context, android.Manifest.permission.ACCESS_FINE_LOCATION
+                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        val hasCoarse = androidx.core.content.ContextCompat.checkSelfPermission(
+                            context, android.Manifest.permission.ACCESS_COARSE_LOCATION
+                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+                        if (hasFine || hasCoarse) {
+                            try {
+                                viewModel.startLiveOfflineMode()
+                                onStartDemo()
+                            } catch (t: Throwable) {
+                                android.util.Log.e("HomeScreen", "Error launching live navigation: ${t.message}", t)
+                            }
+                        } else {
+                            permissionLauncher.launch(
+                                arrayOf(
+                                    android.Manifest.permission.ACCESS_FINE_LOCATION,
+                                    android.Manifest.permission.ACCESS_COARSE_LOCATION
+                                )
+                            )
+                        }
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                    modifier = Modifier.fillMaxWidth().height(50.dp)
+                ) {
+                    Icon(Icons.Default.Navigation, contentDescription = null, tint = Color.Black)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Start On-Device Live Navigation",
+                        color = Color.Black,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
 

@@ -14,10 +14,14 @@ socketIo = "2.1.1"
 json = "20240303"
 tensorflowLite = "2.14.0"
 tensorflowLiteSupport = "0.5.0"
+onnxruntime = "1.18.0"
 mapsCompose = "4.4.1"
 playServicesMaps = "19.0.0"
+playServicesLocation = "21.3.0"
+fragment = "1.8.6"
 
 [libraries]
+androidx-fragment-ktx = { group = "androidx.fragment", name = "fragment-ktx", version.ref = "fragment" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
@@ -39,8 +43,10 @@ google-gson = { group = "com.google.code.gson", name = "gson", version.ref = "gs
 socket-io-client = { group = "io.socket", name = "socket.io-client", version.ref = "socketIo" }
 json = { group = "org.json", name = "json", version.ref = "json" }
 tensorflow-lite = { group = "org.tensorflow", name = "tensorflow-lite", version.ref = "tensorflowLite" }
+onnxruntime-android = { group = "com.microsoft.onnxruntime", name = "onnxruntime-android", version.ref = "onnxruntime" }
 maps-compose = { group = "com.google.maps.android", name = "maps-compose", version.ref = "mapsCompose" }
 play-services-maps = { group = "com.google.android.gms", name = "play-services-maps", version.ref = "playServicesMaps" }
+play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
