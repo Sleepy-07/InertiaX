@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicLong
  * sequence progression, event listeners, and observable StateFlow state.
  */
 class GeoReckonSocketIOClient(
-    val config: GeoReckonConfig = GeoReckonConfig()
+    var config: GeoReckonConfig = GeoReckonConfig()
 ) {
     companion object {
         private const val TAG = "GeoReckonSocketIOClient"
@@ -85,6 +85,17 @@ class GeoReckonSocketIOClient(
     fun getActiveSessionId(): String = activeSessionId
 
     /**
+     * Updates client configuration. If connected, drops current connection to allow reconnecting to new URL.
+     */
+    fun updateConfig(newConfig: GeoReckonConfig) {
+        val wasConnected = isConnected
+        if (wasConnected) {
+            disconnect()
+        }
+        config = newConfig
+    }
+
+    /**
      * Connects to the GeoReckon Socket.IO server using the configured host/port/auth.
      */
     fun connect() {
@@ -97,7 +108,8 @@ class GeoReckonSocketIOClient(
 
         try {
             val opts = IO.Options().apply {
-                transports = arrayOf("websocket")
+                // Support both WebSocket upgrade and HTTP polling fallback for maximum reliability across AWS / LAN
+                transports = arrayOf("websocket", "polling")
                 timeout = config.connectTimeoutMs
                 reconnection = true
                 reconnectionAttempts = config.reconnectMaxRetries
@@ -107,25 +119,38 @@ class GeoReckonSocketIOClient(
                 }
             }
 
-            val uri = URI.create(config.serverUrl)
+            val targetUrl = config.serverUrl
+            Log.i(TAG, "Initiating Socket.IO connection to $targetUrl (Transports: websocket, polling)")
+            val uri = URI.create(targetUrl)
             socket = IO.socket(uri, opts).apply {
                 on(Socket.EVENT_CONNECT) {
-                    Log.i(TAG, "Socket.IO connected to ${config.serverUrl}")
+                    Log.i(TAG, "Socket.IO connected successfully to ${config.serverUrl}")
                     _connectionState.value = GeoReckonConnectionState.CONNECTED_IDLE
                 }
 
                 on(Socket.EVENT_DISCONNECT) { args ->
-                    Log.w(TAG, "Socket.IO disconnected: ${args.firstOrNull()}")
+                    Log.w(TAG, "Socket.IO disconnected from ${config.serverUrl}: ${args.firstOrNull()}")
                     _connectionState.value = GeoReckonConnectionState.DISCONNECTED
                 }
 
                 on(Socket.EVENT_CONNECT_ERROR) { args ->
                     val err = args.firstOrNull()
-                    Log.e(TAG, "Socket.IO connect error: $err")
+                    val detailedMsg = when (err) {
+                        is Throwable -> {
+                            val cause = err.cause
+                            if (cause != null && !cause.message.isNullOrEmpty()) {
+                                "${err.message ?: err.javaClass.simpleName} (${cause.message})"
+                            } else {
+                                err.message ?: err.localizedMessage ?: err.javaClass.simpleName
+                            }
+                        }
+                        else -> err?.toString() ?: "Connection rejected / unreachable"
+                    }
+                    Log.e(TAG, "Socket.IO connect error to ${config.serverUrl}: $detailedMsg", err as? Throwable)
                     _connectionState.value = GeoReckonConnectionState.ERROR
                     val errResp = ErrorResponse(
                         code = GeoReckonErrorCode.CONNECTION_LOST.name,
-                        message = "Connection failed to ${config.serverUrl}: $err"
+                        message = "Connection failed to ${config.serverUrl}: $detailedMsg"
                     )
                     _lastError.value = errResp
                     onError?.invoke(errResp)
@@ -269,5 +294,65 @@ class GeoReckonSocketIOClient(
         } finally {
             _connectionState.value = GeoReckonConnectionState.DISCONNECTED
         }
+    }
+
+    /**
+     * Probes and tests connectivity to the target server URL without affecting active session.
+     * Invokes callback with (success: Boolean, rttMs: Double, message: String).
+     */
+    fun testConnection(
+        targetConfig: GeoReckonConfig = config,
+        timeoutMs: Long = 4000L,
+        onResult: (Boolean, Double, String) -> Unit
+    ) {
+        Thread {
+            var probeSocket: Socket? = null
+            var callbackFired = false
+            val lock = Any()
+
+            fun finish(success: Boolean, rtt: Double, msg: String) {
+                synchronized(lock) {
+                    if (callbackFired) return
+                    callbackFired = true
+                }
+                try {
+                    probeSocket?.disconnect()
+                    probeSocket?.off()
+                    probeSocket?.close()
+                } catch (_: Exception) {}
+                onResult(success, rtt, msg)
+            }
+
+            try {
+                val opts = IO.Options().apply {
+                    transports = arrayOf("websocket", "polling")
+                    timeout = timeoutMs
+                    reconnection = false
+                }
+                val uri = URI.create(targetConfig.serverUrl)
+                val tStart = nowMonotonicMs()
+                probeSocket = IO.socket(uri, opts).apply {
+                    on(Socket.EVENT_CONNECT) {
+                        val connectRtt = (nowMonotonicMs() - tStart).toDouble()
+                        finish(true, connectRtt, "Connected to ${targetConfig.serverUrl} (${connectRtt.toInt()}ms RTT)")
+                    }
+                    on(Socket.EVENT_CONNECT_ERROR) { args ->
+                        val err = args.firstOrNull()
+                        val msg = when (err) {
+                            is Throwable -> err.message ?: err.localizedMessage ?: err.javaClass.simpleName
+                            else -> err?.toString() ?: "Connect error"
+                        }
+                        finish(false, 0.0, "Failed: $msg")
+                    }
+                }
+                probeSocket?.connect()
+
+                // Safety timeout guard
+                Thread.sleep(timeoutMs + 200L)
+                finish(false, 0.0, "Timeout after ${timeoutMs}ms reaching ${targetConfig.serverUrl}")
+            } catch (e: Exception) {
+                finish(false, 0.0, "Initialization failed: ${e.message}")
+            }
+        }.start()
     }
 }

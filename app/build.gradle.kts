@@ -13,6 +13,9 @@ if (localPropertiesFile.exists()) {
     }
 }
 val mapsApiKey: String = localProperties.getProperty("MAPS_API_KEY") ?: ""
+val awsServerUrl: String = localProperties.getProperty("AWS_SERVER_URL")
+    ?: localProperties.getProperty("GEORECKON_AWS_URL")
+    ?: "http://3.230.8.186"
 
 android {
     namespace = "com.sleepingheads.sihpro"
@@ -29,6 +32,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
+        buildConfigField("String", "AWS_SERVER_URL", "\"$awsServerUrl\"")
     }
 
     buildTypes {
@@ -44,6 +48,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     // TFLite / ONNX model must NOT be compressed so we can memory-map it
     androidResources {

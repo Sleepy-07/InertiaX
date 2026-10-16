@@ -51,7 +51,14 @@ class DemoPlaybackController(
         }
     }
 
-    fun initLiveCloudSession(title: String = "AWS EC2 Live Stream") {
+    val originCoordinates: Pair<Double, Double>?
+        get() = _state.value.metadata?.let { Pair(it.originLat, it.originLon) }
+
+    fun initLiveCloudSession(
+        title: String = "AWS EC2 Live Stream",
+        initialLat: Double? = null,
+        initialLon: Double? = null
+    ) {
         playbackJob?.cancel()
         _state.update {
             it.copy(
@@ -78,8 +85,8 @@ class DemoPlaybackController(
                     driftPercent = 0.0,
                     isroTargetPercent = 10.0,
                     isroPassed = true,
-                    originLat = 12.9715987,
-                    originLon = 77.5945627,
+                    originLat = initialLat ?: 12.9715987,
+                    originLon = initialLon ?: 77.5945627,
                     modelVersion = "KinoNet-R2 (AWS Cloud)",
                     dataType = "Live Sensor WebSocket Stream"
                 ),
@@ -92,7 +99,8 @@ class DemoPlaybackController(
 
     fun feedLiveSample(sample: DemoSample, history: List<DemoSample>) {
         _state.update {
-            val updatedMetadata = if (history.size <= 1) {
+            val isDefaultBangalore = (it.metadata?.originLat ?: 0.0) == 12.9715987 && (it.metadata?.originLon ?: 0.0) == 77.5945627
+            val updatedMetadata = if (history.size <= 1 || isDefaultBangalore) {
                 it.metadata?.copy(
                     originLat = sample.trueLat,
                     originLon = sample.trueLon,

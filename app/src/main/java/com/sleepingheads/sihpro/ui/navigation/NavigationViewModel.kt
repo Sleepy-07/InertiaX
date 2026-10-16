@@ -44,14 +44,43 @@ class NavigationViewModel(private val app: Application) : AndroidViewModel(app) 
     private var offlineJob: Job? = null
 
     // ── Online AWS Cloud & WebSocket Pipeline ──────────────────────────────────
+    private val prefs = app.getSharedPreferences("sihpro_backend_prefs", android.content.Context.MODE_PRIVATE)
+
     private val _isLiveCloudMode = MutableStateFlow(false)
     val isLiveCloudMode: StateFlow<Boolean> = _isLiveCloudMode.asStateFlow()
 
-    private val _selectedBackend = MutableStateFlow(BackendEnvironment.AWS_EC2_CLOUD)
+    private val initialEnv = try {
+        val savedEnv = prefs.getString("backend_env", BackendEnvironment.AWS_EC2_CLOUD.name)
+        BackendEnvironment.valueOf(savedEnv ?: BackendEnvironment.AWS_EC2_CLOUD.name)
+    } catch (_: Exception) {
+        BackendEnvironment.AWS_EC2_CLOUD
+    }
+    private val _selectedBackend = MutableStateFlow(initialEnv)
     val selectedBackend: StateFlow<BackendEnvironment> = _selectedBackend.asStateFlow()
 
-    private var socketClient = GeoReckonSocketIOClient(GeoReckonConfig(environment = _selectedBackend.value))
-    private var livePipeline = LiveSensorPipeline(app, socketClient, viewModelScope)
+    private val _customHost = MutableStateFlow(prefs.getString("custom_host", "3.230.8.186") ?: "3.230.8.186")
+    val customHost: StateFlow<String> = _customHost.asStateFlow()
+
+    private val _customPort = MutableStateFlow(prefs.getInt("custom_port", 80))
+    val customPort: StateFlow<Int> = _customPort.asStateFlow()
+
+    private val _isSecure = MutableStateFlow(prefs.getBoolean("is_secure", false))
+    val isSecure: StateFlow<Boolean> = _isSecure.asStateFlow()
+
+    private fun buildCurrentConfig(): GeoReckonConfig {
+        return GeoReckonConfig(
+            environment = _selectedBackend.value,
+            customHost = _customHost.value.ifBlank { null },
+            customPort = _customPort.value,
+            isSecure = _isSecure.value
+        )
+    }
+
+    private val socketClient = GeoReckonSocketIOClient(buildCurrentConfig())
+    private val livePipeline = LiveSensorPipeline(app, socketClient, viewModelScope)
+
+    private val _activeServerUrl = MutableStateFlow(socketClient.config.serverUrl)
+    val activeServerUrl: StateFlow<String> = _activeServerUrl.asStateFlow()
 
     val connectionState: StateFlow<GeoReckonConnectionState> = socketClient.connectionState
     val lastRttMs: StateFlow<Double> = socketClient.lastRttMs
@@ -71,6 +100,62 @@ class NavigationViewModel(private val app: Application) : AndroidViewModel(app) 
         socketClient.onCalibrateDone = { resp ->
             Log.i(TAG, "AWS Calibrate Done: health=${resp.alignmentHealth}, degraded=${resp.degraded}")
             livePipeline.onCalibrateCompleted()
+        }
+
+        livePipeline.onLocationUpdate = { loc ->
+            if (_isLiveCloudMode.value && !livePipeline.isDeadReckoningActive) {
+                val speedMps = if (loc.hasSpeed()) loc.speed.toDouble() else 0.0
+                val bearingDeg = if (loc.hasBearing()) loc.bearing.toDouble() else 0.0
+                val sessionOrigin = controller.originCoordinates
+                val dLatM = if (sessionOrigin != null) (loc.latitude - sessionOrigin.first) * 111320.0 else 0.0
+                val dLonM = if (sessionOrigin != null) (loc.longitude - sessionOrigin.second) * 111320.0 * kotlin.math.cos(Math.toRadians(loc.latitude)) else 0.0
+                val sample = DemoSample(
+                    timestampMs = System.currentTimeMillis(),
+                    trueLat = loc.latitude,
+                    trueLon = loc.longitude,
+                    trueX = dLonM,
+                    trueY = dLatM,
+                    gpsLat = loc.latitude,
+                    gpsLon = loc.longitude,
+                    gnssAvailable = true,
+                    estX = dLonM,
+                    estY = dLatM,
+                    estLat = loc.latitude,
+                    estLon = loc.longitude,
+                    naiveX = dLonM,
+                    naiveY = dLatM,
+                    naiveErrorM = 0.0,
+                    noAiX = dLonM,
+                    noAiY = dLatM,
+                    noAiErrorM = 0.0,
+                    noNhcX = dLonM,
+                    noNhcY = dLatM,
+                    noNhcErrorM = 0.0,
+                    noMapX = dLonM,
+                    noMapY = dLatM,
+                    noMapErrorM = 0.0,
+                    speedMps = speedMps,
+                    speedKmh = speedMps * 3.6,
+                    headingDeg = bearingDeg,
+                    aiSpeedMps = speedMps,
+                    aiUncertainty = 0.05,
+                    mode = "GNSS_FIX",
+                    health = "NORMAL",
+                    uncertaintyM = if (loc.hasAccuracy()) loc.accuracy.toDouble().coerceIn(1.5, 15.0) else 2.5,
+                    alongUncertM = 1.8,
+                    crossUncertM = 1.4,
+                    headingUncertDeg = 1.2,
+                    axisRatio = 1.2,
+                    errorM = 0.0,
+                    accelX = 0.0,
+                    accelY = 0.0,
+                    accelZ = 9.80665,
+                    gyroX = 0.0,
+                    gyroY = 0.0,
+                    gyroZ = 0.0
+                )
+                appendLiveSample(sample)
+            }
         }
 
         socketClient.onPosition = { pos ->
@@ -120,19 +205,43 @@ class NavigationViewModel(private val app: Application) : AndroidViewModel(app) 
                 gyroZ = 0.0
             )
 
-            synchronized(liveSampleHistory) {
-                liveSampleHistory.add(sample)
-                if (liveSampleHistory.size > 800) {
-                    liveSampleHistory.removeAt(0)
-                }
-                if (_isLiveCloudMode.value) {
-                    controller.feedLiveSample(sample, liveSampleHistory.toList())
-                }
+            if (_isLiveCloudMode.value) {
+                appendLiveSample(sample)
             }
         }
 
         socketClient.onError = { err ->
             Log.e(TAG, "Socket.IO Error [${err.code}]: ${err.message}")
+            livePipeline.onCalibrateFailed(err.message)
+        }
+    }
+
+    private fun appendLiveSample(sample: DemoSample) {
+        synchronized(liveSampleHistory) {
+            val lastSample = liveSampleHistory.lastOrNull()
+            val shouldAddHistory = if (lastSample == null) {
+                true
+            } else if (lastSample.mode != sample.mode || lastSample.gnssAvailable != sample.gnssAvailable) {
+                true
+            } else {
+                val dLatM = (sample.estLat - lastSample.estLat) * 111320.0
+                val dLonM = (sample.estLon - lastSample.estLon) * 111320.0 * kotlin.math.cos(Math.toRadians(sample.estLat))
+                val dM = kotlin.math.hypot(dLatM, dLonM)
+                val dtMs = sample.timestampMs - lastSample.timestampMs
+                if (sample.speedKmh < 1.0) {
+                    dM >= 1.0 || dtMs >= 1000L
+                } else {
+                    dM >= 0.25 || dtMs >= 300L
+                }
+            }
+
+            if (shouldAddHistory) {
+                liveSampleHistory.add(sample)
+                if (liveSampleHistory.size > 30000) {
+                    liveSampleHistory.removeAt(0)
+                }
+            }
+            controller.feedLiveSample(sample, liveSampleHistory.toList())
         }
     }
 
@@ -212,31 +321,7 @@ class NavigationViewModel(private val app: Application) : AndroidViewModel(app) 
                     gyroZ = 0.0
                 )
 
-                synchronized(liveSampleHistory) {
-                    val isStopped = out.isStopped || out.speedKmh < 1.0
-                    val lastSample = liveSampleHistory.lastOrNull()
-                    val shouldAddHistory = if (lastSample == null) {
-                        true
-                    } else if (isStopped) {
-                        // While stationary on a table or stopped in traffic, only add periodic heartbeat
-                        (sample.timestampMs - lastSample.timestampMs) >= 2500L
-                    } else {
-                        // When driving, append waypoint if moved or at least 500ms has elapsed
-                        val dLatM = (sample.estLat - lastSample.estLat) * 111320.0
-                        val dLonM = (sample.estLon - lastSample.estLon) * 111320.0 * kotlin.math.cos(Math.toRadians(sample.estLat))
-                        val dM = kotlin.math.hypot(dLatM, dLonM)
-                        dM >= 0.25 || (sample.timestampMs - lastSample.timestampMs) >= 500L
-                    }
-
-                    if (shouldAddHistory) {
-                        liveSampleHistory.add(sample)
-                        // Retain full route history up to 30,000 samples (~50 minutes of continuous driving @ 10 Hz)
-                        if (liveSampleHistory.size > 30000) {
-                            liveSampleHistory.removeAt(0)
-                        }
-                    }
-                    controller.feedLiveSample(sample, liveSampleHistory.toList())
-                }
+                appendLiveSample(sample)
             }
         }
     }
@@ -252,8 +337,11 @@ class NavigationViewModel(private val app: Application) : AndroidViewModel(app) 
 
         _isLiveCloudMode.value = true
         liveSampleHistory.clear()
+        val initialFix = livePipeline.lastGpsFix
         controller.initLiveCloudSession(
-            title = "AWS EC2 • ${_selectedBackend.value.title}"
+            title = "AWS EC2 • ${_selectedBackend.value.title}",
+            initialLat = initialFix?.lat,
+            initialLon = initialFix?.lon
         )
 
         socketClient.connect()
@@ -305,13 +393,14 @@ class NavigationViewModel(private val app: Application) : AndroidViewModel(app) 
 
         if (livePipeline.isDeadReckoningActive) {
             // Restore GNSS fix
+            val lastFix = livePipeline.lastGpsFix
             val dummyLoc = Location("gps").apply {
-                latitude = lastPosition.value?.lat ?: 12.9715987
-                longitude = lastPosition.value?.lon ?: 77.5945627
-                altitude = 920.0
-                speed = (lastPosition.value?.speedMps ?: 10.0).toFloat()
-                bearing = (lastPosition.value?.bearingDeg ?: 45.0).toFloat()
-                accuracy = 2.5f
+                latitude = lastFix?.lat ?: lastPosition.value?.lat ?: 12.9715987
+                longitude = lastFix?.lon ?: lastPosition.value?.lon ?: 77.5945627
+                altitude = lastFix?.altM ?: 920.0
+                speed = (lastFix?.speedMps ?: lastPosition.value?.speedMps ?: 10.0).toFloat()
+                bearing = (lastFix?.bearingDeg ?: lastPosition.value?.bearingDeg ?: 45.0).toFloat()
+                accuracy = (lastFix?.accuracyM ?: 2.5).toFloat()
             }
             livePipeline.onGpsRestored(dummyLoc)
         } else {
@@ -321,18 +410,100 @@ class NavigationViewModel(private val app: Application) : AndroidViewModel(app) 
     }
 
     /**
-     * Switches the backend environment preset (e.g. AWS EC2 Cloud vs Local Emulator)
-     * without requiring the user to type in server URLs manually.
+     * Switches the backend environment preset (e.g. AWS EC2 Cloud vs Local Device Reverse)
+     * and updates configuration and persistence immediately.
      */
     fun switchBackend(environment: BackendEnvironment) {
         _selectedBackend.value = environment
+        prefs.edit().putString("backend_env", environment.name).apply()
+
+        val newConfig = buildCurrentConfig()
+        socketClient.updateConfig(newConfig)
+        _activeServerUrl.value = newConfig.serverUrl
+        Log.i(TAG, "Switched backend to $environment (${newConfig.serverUrl})")
+
         if (_isLiveCloudMode.value) {
             socketClient.disconnect()
             livePipeline.stop()
-            socketClient = GeoReckonSocketIOClient(GeoReckonConfig(environment = environment))
-            livePipeline = LiveSensorPipeline(app, socketClient, viewModelScope)
-            setupSocketCallbacks()
             startLiveCloudMode()
+        }
+    }
+
+    /**
+     * Updates custom server host/IP, port, and security (SSL/TLS).
+     * Automatically strips extraneous paths (e.g. /socket.io/), query parameters (?EIO=4),
+     * and extracts protocol/port if pasted as a full URL.
+     * Persists in SharedPreferences and updates the client immediately.
+     */
+    fun updateCustomEndpoint(rawHost: String, rawPort: Int, rawSecure: Boolean = false) {
+        var cleanHost = rawHost.trim()
+        var secure = rawSecure
+
+        if (cleanHost.startsWith("https://", ignoreCase = true)) {
+            secure = true
+            cleanHost = cleanHost.substring(8)
+        } else if (cleanHost.startsWith("http://", ignoreCase = true)) {
+            secure = false
+            cleanHost = cleanHost.substring(7)
+        } else if (cleanHost.startsWith("wss://", ignoreCase = true)) {
+            secure = true
+            cleanHost = cleanHost.substring(6)
+        } else if (cleanHost.startsWith("ws://", ignoreCase = true)) {
+            secure = false
+            cleanHost = cleanHost.substring(5)
+        }
+
+        if (cleanHost.contains("?")) {
+            cleanHost = cleanHost.substringBefore("?")
+        }
+        if (cleanHost.contains("/")) {
+            cleanHost = cleanHost.substringBefore("/")
+        }
+        cleanHost = cleanHost.trim()
+
+        var effectivePort = rawPort
+        if (cleanHost.contains(":")) {
+            val parts = cleanHost.split(":")
+            cleanHost = parts[0]
+            parts.getOrNull(1)?.toIntOrNull()?.let { effectivePort = it }
+        }
+
+        _customHost.value = cleanHost
+        _customPort.value = effectivePort
+        _isSecure.value = secure
+        prefs.edit()
+            .putString("custom_host", cleanHost)
+            .putInt("custom_port", effectivePort)
+            .putBoolean("is_secure", secure)
+            .apply()
+
+        val newConfig = buildCurrentConfig()
+        socketClient.updateConfig(newConfig)
+        _activeServerUrl.value = newConfig.serverUrl
+        Log.i(TAG, "Updated custom endpoint to ${newConfig.serverUrl}")
+
+        if (_isLiveCloudMode.value) {
+            socketClient.disconnect()
+            livePipeline.stop()
+            startLiveCloudMode()
+        }
+    }
+
+    /**
+     * Performs a non-disruptive connection ping test to the configured backend.
+     */
+    fun testConnection(onResult: (Boolean, Double, String) -> Unit) {
+        val config = buildCurrentConfig()
+        socketClient.testConnection(config, timeoutMs = 4000L, onResult = onResult)
+    }
+
+    /**
+     * Reconnects to the active AWS/server endpoint if connection was lost or failed.
+     */
+    fun retryCloudConnection() {
+        if (_isLiveCloudMode.value) {
+            socketClient.disconnect()
+            socketClient.connect()
         }
     }
 

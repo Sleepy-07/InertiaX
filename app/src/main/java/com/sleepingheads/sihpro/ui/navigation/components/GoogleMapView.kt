@@ -102,11 +102,20 @@ fun GoogleMapView(
             .build()
     }
 
-    // Force perfect zoom to vehicle location on startup or trip reset
+    val metersPerDegLat = 111320.0
+    val metersPerDegLon = metersPerDegLat * Math.cos(Math.toRadians(originLat))
+
+    var lastCamTarget by remember { mutableStateOf<LatLng?>(null) }
+    var lastCamBearing by remember { mutableFloatStateOf(0f) }
+
+    // Force perfect zoom to vehicle location on startup or when real GPS fix arrives
     var hasSnappedInitial by remember(metadata?.tripId) { mutableStateOf(false) }
 
-    LaunchedEffect(metadata?.tripId, currentSampleIndex == 0, safeEstLat != originLat) {
-        if (!hasSnappedInitial || currentSampleIndex == 0) {
+    val isDefaultBangalore = Math.abs(safeEstLat - 12.9715987) < 0.001 && Math.abs(safeEstLon - 77.5945627) < 0.001
+    val isRealFix = !safeEstLat.isNaN() && !safeEstLon.isNaN() && (safeEstLat != 0.0 || safeEstLon != 0.0)
+
+    LaunchedEffect(metadata?.tripId, currentSampleIndex == 0, safeEstLat, safeEstLon) {
+        if (!hasSnappedInitial || currentSampleIndex == 0 || (!isDefaultBangalore && isRealFix)) {
             val target = LatLng(safeEstLat, safeEstLon)
             val bearing = if (activeSample.headingDeg.isNaN()) 0f else activeSample.headingDeg.toFloat()
             val tilt = if (isPerspective3D) 45f else 0f
@@ -120,17 +129,12 @@ fun GoogleMapView(
                         .build()
                 )
             )
-            if (safeEstLat != originLat || currentSampleIndex > 0) {
+            if (!isDefaultBangalore && isRealFix) {
                 hasSnappedInitial = true
+                lastCamTarget = target
             }
         }
     }
-
-    val metersPerDegLat = 111320.0
-    val metersPerDegLon = metersPerDegLat * Math.cos(Math.toRadians(originLat))
-
-    var lastCamTarget by remember { mutableStateOf<LatLng?>(null) }
-    var lastCamBearing by remember { mutableFloatStateOf(0f) }
 
     // High performance real-time camera tracking with deadband stabilization:
     // Using move() instead of animate() removes all frame queue lag and stutters at 10 Hz
@@ -144,13 +148,8 @@ fun GoogleMapView(
         val tilt = if (isPerspective3D) 45f else 0f
         val currentZoom = cameraPositionState.position.zoom.takeIf { it >= 10f } ?: 17.5f
 
-        // When stationary on a table or stopped in traffic, do NOT issue continuous camera moves!
-        // This prevents 10 Hz camera stutter and rotating horizon while at a standstill.
         val isStopped = activeSample.speedKmh < 1.5
         val prevTarget = lastCamTarget
-        if (prevTarget != null && isStopped) {
-            return@LaunchedEffect
-        }
 
         if (prevTarget != null) {
             val dLatM = (target.latitude - prevTarget.latitude) * metersPerDegLat
@@ -159,8 +158,13 @@ fun GoogleMapView(
             var bDiff = Math.abs(bearing - lastCamBearing) % 360f
             if (bDiff > 180f) bDiff = 360f - bDiff
 
+            // If stationary and displacement is under 1.5m, do not jitter the camera
+            if (isStopped && distM < 1.5) {
+                return@LaunchedEffect
+            }
+
             // Deadband: skip moving camera if movement is sub-decimeter and angle change is tiny
-            if (distM < 0.4 && bDiff < 1.5f) {
+            if (distM < 0.35 && bDiff < 1.5f) {
                 return@LaunchedEffect
             }
         }

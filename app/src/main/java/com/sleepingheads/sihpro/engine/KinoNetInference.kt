@@ -215,8 +215,19 @@ class KinoNetInference(context: Context) {
     }
 
     fun close() {
-        ortSession?.close()
-        ortEnv?.close()
-        tfliteInterpreter?.close()
+        try {
+            ortSession?.close()
+        } catch (_: Exception) {}
+        ortSession = null
+
+        try {
+            ortEnv?.close()
+        } catch (_: Exception) {}
+        ortEnv = null
+
+        try {
+            tfliteInterpreter?.close()
+        } catch (_: Exception) {}
+        tfliteInterpreter = null
     }
 }

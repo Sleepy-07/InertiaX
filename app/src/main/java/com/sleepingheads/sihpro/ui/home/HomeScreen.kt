@@ -9,6 +9,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -41,7 +43,61 @@ fun HomeScreen(
     val isLiveOfflineMode by viewModel.isLiveOfflineMode.collectAsState()
     val isLiveCloudMode by viewModel.isLiveCloudMode.collectAsState()
     val connState by viewModel.connectionState.collectAsState()
-    val selectedBackend by viewModel.selectedBackend.collectAsState()
+    val activeServerUrl by viewModel.activeServerUrl.collectAsState()
+
+    var isTestingConnection by remember { mutableStateOf(false) }
+    var testResult by remember { mutableStateOf<Triple<Boolean, Double, String>?>(null) }
+
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var pendingLiveMode by remember { mutableStateOf<String?>(null) }
+    val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val fineGranted = permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] ?: false
+        val coarseGranted = permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
+        if (fineGranted || coarseGranted) {
+            try {
+                if (pendingLiveMode == "CLOUD") {
+                    viewModel.startLiveCloudMode()
+                } else {
+                    viewModel.startLiveOfflineMode()
+                }
+                onStartDemo()
+            } catch (t: Throwable) {
+                android.util.Log.e("HomeScreen", "Error launching live navigation: ${t.message}", t)
+            }
+        }
+    }
+
+    val launchLiveWithPermission: (String) -> Unit = { mode ->
+        pendingLiveMode = mode
+        val hasFine = androidx.core.content.ContextCompat.checkSelfPermission(
+            context, android.Manifest.permission.ACCESS_FINE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val hasCoarse = androidx.core.content.ContextCompat.checkSelfPermission(
+            context, android.Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        if (hasFine || hasCoarse) {
+            try {
+                if (mode == "CLOUD") {
+                    viewModel.startLiveCloudMode()
+                } else {
+                    viewModel.startLiveOfflineMode()
+                }
+                onStartDemo()
+            } catch (t: Throwable) {
+                android.util.Log.e("HomeScreen", "Error launching live navigation: ${t.message}", t)
+            }
+        } else {
+            permissionLauncher.launch(
+                arrayOf(
+                    android.Manifest.permission.ACCESS_FINE_LOCATION,
+                    android.Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -220,48 +276,9 @@ fun HomeScreen(
                     }
                 }
 
-                val context = androidx.compose.ui.platform.LocalContext.current
-                val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-                    androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
-                ) { permissions ->
-                    val fineGranted = permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] ?: false
-                    val coarseGranted = permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
-                    if (fineGranted || coarseGranted) {
-                        try {
-                            viewModel.startLiveOfflineMode()
-                            onStartDemo()
-                        } catch (t: Throwable) {
-                            android.util.Log.e("HomeScreen", "Error launching live navigation: ${t.message}", t)
-                        }
-                    }
-                }
-
                 // CTA Button: Launch On-Device Live Mode
                 Button(
-                    onClick = {
-                        val hasFine = androidx.core.content.ContextCompat.checkSelfPermission(
-                            context, android.Manifest.permission.ACCESS_FINE_LOCATION
-                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                        val hasCoarse = androidx.core.content.ContextCompat.checkSelfPermission(
-                            context, android.Manifest.permission.ACCESS_COARSE_LOCATION
-                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-
-                        if (hasFine || hasCoarse) {
-                            try {
-                                viewModel.startLiveOfflineMode()
-                                onStartDemo()
-                            } catch (t: Throwable) {
-                                android.util.Log.e("HomeScreen", "Error launching live navigation: ${t.message}", t)
-                            }
-                        } else {
-                            permissionLauncher.launch(
-                                arrayOf(
-                                    android.Manifest.permission.ACCESS_FINE_LOCATION,
-                                    android.Manifest.permission.ACCESS_COARSE_LOCATION
-                                )
-                            )
-                        }
-                    },
+                    onClick = { launchLiveWithPermission("OFFLINE") },
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
                     modifier = Modifier.fillMaxWidth().height(50.dp)
@@ -327,12 +344,34 @@ fun HomeScreen(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(10.dp))
-                            .background(Color(0x3300E676))
+                            .background(
+                                when (connState) {
+                                    GeoReckonConnectionState.CONNECTED_IDLE,
+                                    GeoReckonConnectionState.DEAD_RECKONING -> Color(0x3300E676)
+                                    GeoReckonConnectionState.CONNECTING,
+                                    GeoReckonConnectionState.CALIBRATING -> Color(0x33FFD600)
+                                    GeoReckonConnectionState.ERROR -> Color(0x33FF1744)
+                                    else -> Color(0x22FFFFFF)
+                                }
+                            )
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = "PRECONFIGURED",
-                            color = Color(0xFF00E676),
+                            text = when (connState) {
+                                GeoReckonConnectionState.CONNECTED_IDLE -> "CONNECTED"
+                                GeoReckonConnectionState.DEAD_RECKONING -> "STREAMING"
+                                GeoReckonConnectionState.CONNECTING -> "CONNECTING"
+                                GeoReckonConnectionState.ERROR -> "DISCONNECTED"
+                                else -> "READY"
+                            },
+                            color = when (connState) {
+                                GeoReckonConnectionState.CONNECTED_IDLE,
+                                GeoReckonConnectionState.DEAD_RECKONING -> Color(0xFF00E676)
+                                GeoReckonConnectionState.CONNECTING,
+                                GeoReckonConnectionState.CALIBRATING -> Color(0xFFFFD600)
+                                GeoReckonConnectionState.ERROR -> Color(0xFFFF5252)
+                                else -> Color(0xFF90A4AE)
+                            },
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -340,49 +379,101 @@ fun HomeScreen(
                 }
 
                 Text(
-                    text = "Streams real-time 10 Hz phone IMU vectors over WebSocket to the AWS EC2 hosted KinoNet-R2 neural network & InEKF engine. Full dead reckoning with zero manual configuration.",
+                    text = "Streams real-time 10 Hz phone IMU vectors over WebSocket to the AWS EC2 hosted KinoNet-R2 neural network & InEKF engine. Full dead reckoning with high-frequency telemetry.",
                     color = Color(0xFFCFD8DC),
                     fontSize = 12.sp,
                     lineHeight = 17.sp
                 )
 
-                // Built-in backend target selection (zero manual typing required)
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = "BUILT-IN SERVER TARGET:",
-                        color = Color(0xFF78909C),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                // Active Endpoint Banner with Test Ping
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF0A0F1A))
+                        .border(1.dp, Color(0x3300E5FF), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        BackendEnvironment.values().forEach { env ->
-                            val isSelected = selectedBackend == env
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(if (isSelected) Color(0xFF1E2C48) else Color(0xFF0E131E))
-                                    .border(
-                                        1.dp,
-                                        if (isSelected) Color(0xFF00E5FF) else Color(0x22FFFFFF),
-                                        RoundedCornerShape(10.dp)
-                                    )
-                                    .clickable { viewModel.switchBackend(env) }
-                                    .padding(vertical = 8.dp, horizontal = 4.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Link, contentDescription = null, tint = Color(0xFF00E5FF), modifier = Modifier.size(16.dp))
+                            Text(
+                                text = activeServerUrl,
+                                color = Color(0xFFE0F7FA),
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                        }
+
+                        // Test Ping button
+                        TextButton(
+                            onClick = {
+                                isTestingConnection = true
+                                testResult = null
+                                viewModel.testConnection { success, rtt, msg ->
+                                    isTestingConnection = false
+                                    testResult = Triple(success, rtt, msg)
+                                }
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier.height(28.dp)
+                        ) {
+                            if (isTestingConnection) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(12.dp),
+                                    strokeWidth = 2.dp,
+                                    color = Color(0xFF00E5FF)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Testing...", color = Color(0xFF00E5FF), fontSize = 10.sp)
+                            } else {
+                                Icon(Icons.Default.Bolt, contentDescription = null, tint = Color(0xFF00E5FF), modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(2.dp))
+                                Text("Test Ping", color = Color(0xFF00E5FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+
+                // Test Ping Feedback Banner
+                testResult?.let { (success, rtt, msg) ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (success) Color(0x2200E676) else Color(0x22FF1744))
+                            .border(1.dp, if (success) Color(0xFF00E676) else Color(0xFFFF1744), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(
+                                if (success) Icons.Default.CheckCircle else Icons.Default.ErrorOutline,
+                                contentDescription = null,
+                                tint = if (success) Color(0xFF00E676) else Color(0xFFFF5252),
+                                modifier = Modifier.size(16.dp).padding(top = 1.dp)
+                            )
+                            Column {
                                 Text(
-                                    text = when (env) {
-                                        BackendEnvironment.AWS_EC2_CLOUD -> "AWS EC2 Cloud"
-                                        BackendEnvironment.LOCAL_EMULATOR -> "Emulator"
-                                        BackendEnvironment.LOCAL_DEVICE_REVERSE -> "USB Reverse"
-                                    },
-                                    color = if (isSelected) Color(0xFF00E5FF) else Color(0xFF90A4AE),
+                                    text = if (success) "ONLINE • Ping: ${rtt.toInt()}ms" else "CONNECTION FAILED",
+                                    color = if (success) Color(0xFF00E676) else Color(0xFFFF5252),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = msg,
+                                    color = if (success) Color(0xFFB9F6CA) else Color(0xFFFF8A80),
                                     fontSize = 10.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                    lineHeight = 14.sp
                                 )
                             }
                         }
@@ -391,10 +482,7 @@ fun HomeScreen(
 
                 // CTA Button: Launch AWS Live Cloud Navigation
                 Button(
-                    onClick = {
-                        viewModel.startLiveCloudMode()
-                        onStartDemo()
-                    },
+                    onClick = { launchLiveWithPermission("CLOUD") },
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
                     modifier = Modifier.fillMaxWidth().height(50.dp)

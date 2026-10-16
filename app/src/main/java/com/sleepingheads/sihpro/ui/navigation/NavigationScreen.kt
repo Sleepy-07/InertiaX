@@ -41,6 +41,8 @@ fun NavigationScreen(
     val connState by viewModel.connectionState.collectAsState()
     val lastRttMs by viewModel.lastRttMs.collectAsState()
     val lastPosition by viewModel.lastPosition.collectAsState()
+    val lastError by viewModel.lastError.collectAsState()
+    val activeServerUrl by viewModel.activeServerUrl.collectAsState()
 
     val sample = state.currentSample
     val mode = sample?.mode ?: "INITIALIZING"
@@ -305,37 +307,95 @@ fun NavigationScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.weight(1f, fill = false)
+                    ) {
                         Box(
                             modifier = Modifier
                                 .size(7.dp)
                                 .background(
-                                    if (connState == GeoReckonConnectionState.CONNECTED_IDLE || connState == GeoReckonConnectionState.DEAD_RECKONING) Color(0xFF00E676) else Color(0xFFFF9100),
+                                    when (connState) {
+                                        GeoReckonConnectionState.CONNECTED_IDLE,
+                                        GeoReckonConnectionState.DEAD_RECKONING -> Color(0xFF00E676)
+                                        GeoReckonConnectionState.CONNECTING,
+                                        GeoReckonConnectionState.CALIBRATING -> Color(0xFFFFD600)
+                                        else -> Color(0xFFFF5252)
+                                    },
                                     CircleShape
                                 )
                         )
                         Text(
-                            text = "AWS WSS: ${connState.name}",
+                            text = "AWS: ${connState.name}",
                             color = Color(0xFF00E5FF),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text("•", color = Color(0xFF546E7A), fontSize = 10.sp)
                         Text(
-                            text = "RTT ${lastRttMs.toInt()}ms",
+                            text = if (connState == GeoReckonConnectionState.CONNECTED_IDLE || connState == GeoReckonConnectionState.DEAD_RECKONING)
+                                "${lastRttMs.toInt()}ms RTT" else activeServerUrl,
                             color = Color(0xFF90A4AE),
                             fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1
                         )
                     }
 
-                    Text(
-                        text = "AI: ${String.format("%.1f", (lastPosition?.kinonetSpeedMps ?: sample?.aiSpeedMps ?: 0.0) * 3.6)} km/h",
-                        color = Color(0xFF00E676),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
+                    if (connState == GeoReckonConnectionState.ERROR) {
+                        Text(
+                            text = "RECONNECT",
+                            color = Color(0xFFFF5252),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color(0x33FF1744))
+                                .clickable { viewModel.retryCloudConnection() }
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    } else {
+                        Text(
+                            text = "AI: ${String.format("%.1f", (lastPosition?.kinonetSpeedMps ?: sample?.aiSpeedMps ?: 0.0) * 3.6)} km/h",
+                            color = Color(0xFF00E676),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+
+                // If error occurs, show detailed message banner
+                if (connState == GeoReckonConnectionState.ERROR && lastError != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xE6B71C1C)),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = lastError?.message ?: "Connection error to $activeServerUrl",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Button(
+                                onClick = { viewModel.retryCloudConnection() },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.height(24.dp)
+                            ) {
+                                Text("Retry", color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
                 }
             }
 
@@ -659,14 +719,17 @@ fun NavigationScreen(
                     }
 
                     Button(
-                        onClick = onNavigateToResults,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                        onClick = {
+                            viewModel.startReplayMode()
+                            onNavigateBack()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF263238)),
                         shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                     ) {
-                        Text("Results", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Icon(Icons.Default.Stop, contentDescription = null, tint = Color(0xFFFF5252), modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Icon(Icons.Default.Assessment, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                        Text("Exit Live", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             } else {
