@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Mapbox Navigation 3D</title>
+  <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #map {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #0B0E14;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    /* Loading Overlay */
+    #loader {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #0B0E14;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      transition: opacity 0.4s ease;
+      pointer-events: none;
+    }
+    .spinner {
+      width: 44px;
+      height: 44px;
+      border: 3px solid rgba(0, 229, 255, 0.2);
+      border-top-color: #00E5FF;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    #loader-text {
+      margin-top: 14px;
+      color: #00E5FF;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Error Banner */
+    #error-banner {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      right: 16px;
+      padding: 10px 14px;
+      background: rgba(239, 68, 68, 0.9);
+      color: white;
+      font-size: 12px;
+      border-radius: 10px;
+      z-index: 10000;
+      display: none;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    }
+
+    /* Custom 3D Vehicle Marker (Snap Map / Cyberpunk Puck) */
+    .vehicle-marker {
+      width: 48px;
+      height: 48px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      transition: transform 0.1s linear;
+    }
+    .vehicle-pulse {
+      position: absolute;
+      width: 46px;
+      height: 46px;
+      border-radius: 50%;
+      background: rgba(0, 229, 255, 0.25);
+      border: 2px solid #00E5FF;
+      animation: pulse 1.8s infinite ease-out;
+    }
+    .vehicle-pulse.blackout {
+      background: rgba(255, 145, 0, 0.25);
+      border-color: #FF9100;
+    }
+    @keyframes pulse {
+      0% { transform: scale(0.6); opacity: 1; }
+      100% { transform: scale(1.6); opacity: 0; }
+    }
+    .vehicle-puck {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: #0B0E14;
+      border: 3px solid #00E5FF;
+      box-shadow: 0 0 12px rgba(0, 229, 255, 0.8), 0 4px 8px rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      z-index: 2;
+    }
+    .vehicle-puck.blackout {
+      border-color: #FF9100;
+      box-shadow: 0 0 12px rgba(255, 145, 0, 0.8), 0 4px 8px rgba(0,0,0,0.5);
+    }
+    .vehicle-arrow {
+      width: 0;
+      height: 0;
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-bottom: 12px solid #FFFFFF;
+      transform: translateY(-2px);
+    }
+
+    /* Naive Drift Marker */
+    .naive-marker {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: rgba(239, 68, 68, 0.25);
+      border: 2px dashed #EF4444;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      color: #EF4444;
+      font-weight: bold;
+      box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+      pointer-events: none;
+    }
+
+    /* True GPS Marker during Outage */
+    .true-gps-marker {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: 2px solid #00E676;
+      background: rgba(0, 230, 118, 0.25);
+      box-shadow: 0 0 8px #00E676;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    .true-gps-marker::after {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #00E676;
+    }
+
+    /* Hide default Mapbox logo / attribution to keep clean UI for in-app navigation */
+    .mapboxgl-ctrl-bottom-left, .mapboxgl-ctrl-bottom-right {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="loader">
+    <div class="spinner"></div>
+    <div id="loader-text">Loading Mapbox 3D Engine...</div>
+  </div>
+  <div id="error-banner"></div>
+  <div id="map"></div>
+
+  <script>
+    // Embedded template placeholders
+    const DEFAULT_TOKEN = "__MAPBOX_TOKEN__";
+    const DEFAULT_LAT = __DEFAULT_LAT__;
+    const DEFAULT_LON = __DEFAULT_LON__;
+    const DEFAULT_STYLE = "__DEFAULT_STYLE__";
+    const DEFAULT_3D = __DEFAULT_3D__;
+
+    let map = null;
+    let is3DMode = true;
+    let currentStyleType = 'normal';
+    let currentToken = '';
+    let autoFollow = true;
+
+    let currentLat = 12.9715987;
+    let currentLon = 77.5945627;
+    let currentBearing = 0;
+    let currentZoom = 17.5;
+
+    let vehicleMarker = null;
+    let vehicleElement = null;
+    let naiveMarker = null;
+    let naiveElement = null;
+    let trueGpsMarker = null;
+    let trueGpsElement = null;
+
+    let pathData = {
+      truePath: [],
+      estPath: [],
+      naivePath: [],
+      outagePath: []
+    };
+
+    const STYLE_URLS = {
+      normal: 'mapbox://styles/mapbox/streets-v12',
+      satellite: 'mapbox://styles/mapbox/satellite-streets-v12',
+      dark: 'mapbox://styles/mapbox/navigation-night-v1'
+    };
+
+    function showError(msg) {
+      console.error(msg);
+      const err = document.getElementById('error-banner');
+      if (err) {
+        err.innerText = msg;
+        err.style.display = 'block';
+      }
+    }
+
+    function hideLoader() {
+      const loader = document.getElementById('loader');
+      if (loader) {
+        loader.style.opacity = '0';
+        setTimeout(() => { loader.style.display = 'none'; }, 400);
+      }
+    }
+
+    function initMap(token, lat, lon, zoom, styleType, enable3D) {
+      if (map) return; // Already initialized
+
+      currentToken = (token && token.indexOf('__') === -1) ? token : currentToken;
+      if (!currentToken) {
+        showError("No Mapbox Access Token found.");
+        return;
+      }
+
+      if (typeof mapboxgl === 'undefined') {
+        console.log("Waiting for mapboxgl script to load...");
+        setTimeout(() => initMap(token, lat, lon, zoom, styleType, enable3D), 100);
+        return;
+      }
+
+      mapboxgl.accessToken = currentToken;
+      currentLat = (!isNaN(lat) && lat !== 0) ? lat : currentLat;
+      currentLon = (!isNaN(lon) && lon !== 0) ? lon : currentLon;
+      currentZoom = zoom || 17.5;
+      currentStyleType = styleType || 'normal';
+      is3DMode = enable3D !== undefined ? enable3D : true;
+
+      const styleUrl = STYLE_URLS[currentStyleType] || STYLE_URLS.normal;
+
+      try {
+        map = new mapboxgl.Map({
+          container: 'map',
+          style: styleUrl,
+          center: [currentLon, currentLat],
+          zoom: currentZoom,
+          pitch: is3DMode ? 60 : 0,
+          bearing: currentBearing,
+          antialias: true
+        });
+
+        map.on('error', (e) => {
+          if (e && e.error && e.error.message) {
+            console.warn("Mapbox warning:", e.error.message);
+          }
+        });
+
+        // Break auto-follow when user manually drags the map
+        map.on('dragstart', () => { autoFollow = false; });
+
+        map.on('load', () => {
+          hideLoader();
+          map.resize();
+          setup3DAndTerrain();
+          setupTrajectoryLayers();
+          createMarkers();
+        });
+
+        map.on('style.load', () => {
+          setup3DAndTerrain();
+          setupTrajectoryLayers();
+          createMarkers();
+        });
+
+      } catch (err) {
+        showError("Mapbox initialization error: " + err.message);
+      }
+    }
+
+    function setup3DAndTerrain() {
+      if (!map) return;
+
+      // 1. Sky & Atmosphere (Snapchat 3D feel)
+      try {
+        if (!map.getLayer('sky') && map.addLayer) {
+          map.addLayer({
+            'id': 'sky',
+            'type': 'sky',
+            'paint': {
+              'sky-type': 'atmosphere',
+              'sky-atmosphere-sun': [0.0, 90.0],
+              'sky-atmosphere-sun-intensity': 15
+            }
+          });
+        }
+      } catch (e) {}
+
+      // 2. 3D Terrain
+      try {
+        if (!map.getSource('mapbox-dem')) {
+          map.addSource('mapbox-dem', {
+            'type': 'raster-dem',
+            'url': 'mapbox://mapbox.mapbox-terrain-dem-v1',
+            'tileSize': 512,
+            'maxzoom': 14
+          });
+        }
+        if (is3DMode) {
+          map.setTerrain({ 'source': 'mapbox-dem', 'exaggeration': 1.4 });
+        } else {
+          map.setTerrain(null);
+        }
+      } catch (e) {}
+
+      // 3. 3D Extruded Buildings
+      try {
+        if (!map.getLayer('3d-buildings')) {
+          const layers = map.getStyle().layers;
+          let labelLayerId;
+          for (let i = 0; i < layers.length; i++) {
+            if (layers[i].type === 'symbol' && layers[i].layout && layers[i].layout['text-field']) {
+              labelLayerId = layers[i].id;
+              break;
+            }
+          }
+
+          map.addLayer({
+            'id': '3d-buildings',
+            'source': 'composite',
+            'source-layer': 'building',
+            'filter': ['==', 'extrude', 'true'],
+            'type': 'fill-extrusion',
+            'minzoom': 14,
+            'paint': {
+              'fill-extrusion-color': [
+                'interpolate',
+                ['linear'],
+                ['get', 'height'],
+                0, currentStyleType === 'satellite' ? '#222B38' : '#263147',
+                30, currentStyleType === 'satellite' ? '#3B4860' : '#334466',
+                70, '#00E5FF'
+              ],
+              'fill-extrusion-height': ['get', 'height'],
+              'fill-extrusion-base': ['get', 'min_height'],
+              'fill-extrusion-opacity': is3DMode ? 0.85 : 0.0
+            }
+          }, labelLayerId);
+        } else {
+          map.setPaintProperty('3d-buildings', 'fill-extrusion-opacity', is3DMode ? 0.85 : 0.0);
+        }
+      } catch (e) {}
+    }
+
+    function setupTrajectoryLayers() {
+      if (!map) return;
+
+      function addGeoJsonSource(id, coords) {
+        if (!map.getSource(id)) {
+          map.addSource(id, {
+            'type': 'geojson',
+            'data': {
+              'type': 'Feature',
+              'geometry': {
+                'type': 'LineString',
+                'coordinates': coords || []
+              }
+            }
+          });
+        }
+      }
+
+      // 1. Outage Zone Corridor (Magenta)
+      addGeoJsonSource('outage-source', pathData.outagePath);
+      if (!map.getLayer('outage-layer')) {
+        map.addLayer({
+          'id': 'outage-layer',
+          'type': 'line',
+          'source': 'outage-source',
+          'layout': { 'line-join': 'round', 'line-cap': 'round' },
+          'paint': {
+            'line-color': '#E040FB',
+            'line-width': 22,
+            'line-opacity': 0.45
+          }
+        });
+      }
+
+      // 2. Ground Truth GPS Line (Green)
+      addGeoJsonSource('true-path-source', pathData.truePath);
+      if (!map.getLayer('true-path-layer')) {
+        map.addLayer({
+          'id': 'true-path-layer',
+          'type': 'line',
+          'source': 'true-path-source',
+          'layout': { 'line-join': 'round', 'line-cap': 'round' },
+          'paint': {
+            'line-color': '#00E676',
+            'line-width': 5,
+            'line-opacity': 0.9
+          }
+        });
+      }
+
+      // 3. Naive INS Drift Trajectory (Crimson Dashed)
+      addGeoJsonSource('naive-path-source', pathData.naivePath);
+      if (!map.getLayer('naive-path-layer')) {
+        map.addLayer({
+          'id': 'naive-path-layer',
+          'type': 'line',
+          'source': 'naive-path-source',
+          'layout': { 'line-join': 'round', 'line-cap': 'round' },
+          'paint': {
+            'line-color': '#EF4444',
+            'line-width': 4,
+            'line-dasharray': [2, 2],
+            'line-opacity': 0.8
+          }
+        });
+      }
+
+      // 4. Estimated GeoReckon Trajectory (Cyan / Amber)
+      addGeoJsonSource('est-path-source', pathData.estPath);
+      if (!map.getLayer('est-path-layer')) {
+        map.addLayer({
+          'id': 'est-path-layer',
+          'type': 'line',
+          'source': 'est-path-source',
+          'layout': { 'line-join': 'round', 'line-cap': 'round' },
+          'paint': {
+            'line-color': '#00E5FF',
+            'line-width': 7,
+            'line-opacity': 1.0
+          }
+        });
+      }
+    }
+
+    function createMarkers() {
+      if (!map) return;
+
+      // 1. Vehicle Marker
+      if (!vehicleMarker) {
+        vehicleElement = document.createElement('div');
+        vehicleElement.className = 'vehicle-marker';
+        vehicleElement.innerHTML = `
+          <div class="vehicle-pulse" id="puck-pulse"></div>
+          <div class="vehicle-puck" id="puck-body">
+            <div class="vehicle-arrow"></div>
+          </div>
+        `;
+        vehicleMarker = new mapboxgl.Marker({ element: vehicleElement, rotationAlignment: 'map' })
+          .setLngLat([currentLon, currentLat])
+          .addTo(map);
+      }
+
+      // 2. Naive INS Marker
+      if (!naiveMarker) {
+        naiveElement = document.createElement('div');
+        naiveElement.className = 'naive-marker';
+        naiveElement.innerHTML = '!';
+        naiveMarker = new mapboxgl.Marker({ element: naiveElement })
+          .setLngLat([currentLon, currentLat])
+          .addTo(map);
+        naiveElement.style.display = 'none';
+      }
+
+      // 3. True GPS Marker (during blackout)
+      if (!trueGpsMarker) {
+        trueGpsElement = document.createElement('div');
+        trueGpsElement.className = 'true-gps-marker';
+        trueGpsMarker = new mapboxgl.Marker({ element: trueGpsElement })
+          .setLngLat([currentLon, currentLat])
+          .addTo(map);
+        trueGpsElement.style.display = 'none';
+      }
+    }
+
+    // ── Callable API from Android ──────────────────────────────────────────────
+
+    function updateVehicle(lat, lon, bearing, speedKmh, mode, uncertaintyM, naiveLat, naiveLon, naiveErrorM, isBlackout, trueLat, trueLon) {
+      if (isNaN(lat) || isNaN(lon) || (lat === 0 && lon === 0)) return;
+
+      currentLat = lat;
+      currentLon = lon;
+      currentBearing = !isNaN(bearing) ? bearing : currentBearing;
+
+      if (vehicleMarker) {
+        vehicleMarker.setLngLat([lon, lat]);
+        vehicleMarker.setRotation(currentBearing);
+
+        const pulse = document.getElementById('puck-pulse');
+        const puck = document.getElementById('puck-body');
+        if (isBlackout) {
+          pulse && pulse.classList.add('blackout');
+          puck && puck.classList.add('blackout');
+        } else {
+          pulse && pulse.classList.remove('blackout');
+          puck && puck.classList.remove('blackout');
+        }
+      }
+
+      // Update estimated line color during blackout
+      if (map && map.getLayer('est-path-layer')) {
+        map.setPaintProperty('est-path-layer', 'line-color', isBlackout ? '#FF9100' : '#00E5FF');
+      }
+
+      // Update Naive Marker
+      if (naiveMarker && naiveElement) {
+        if (!isNaN(naiveLat) && !isNaN(naiveLon) && (isBlackout || naiveErrorM > 4.0)) {
+          naiveMarker.setLngLat([naiveLon, naiveLat]);
+          naiveElement.style.display = 'flex';
+        } else {
+          naiveElement.style.display = 'none';
+        }
+      }
+
+      // Update True GPS Marker during blackout
+      if (trueGpsMarker && trueGpsElement) {
+        if (isBlackout && !isNaN(trueLat) && !isNaN(trueLon) && (trueLat !== 0 || trueLon !== 0)) {
+          trueGpsMarker.setLngLat([trueLon, trueLat]);
+          trueGpsElement.style.display = 'flex';
+        } else {
+          trueGpsElement.style.display = 'none';
+        }
+      }
+
+      // Smooth camera follow
+      if (map && autoFollow) {
+        map.easeTo({
+          center: [lon, lat],
+          bearing: currentBearing,
+          pitch: is3DMode ? 60 : 0,
+          duration: 120,
+          easing: (t) => t
+        });
+      }
+    }
+
+    function setPathData(trueCoordsJson, estCoordsJson, naiveCoordsJson, outageCoordsJson) {
+      try {
+        if (trueCoordsJson) pathData.truePath = JSON.parse(trueCoordsJson);
+        if (estCoordsJson) pathData.estPath = JSON.parse(estCoordsJson);
+        if (naiveCoordsJson) pathData.naivePath = JSON.parse(naiveCoordsJson);
+        if (outageCoordsJson) pathData.outagePath = JSON.parse(outageCoordsJson);
+
+        if (!map) return;
+
+        function updateSource(id, coords) {
+          const src = map.getSource(id);
+          if (src) {
+            src.setData({
+              'type': 'Feature',
+              'geometry': {
+                'type': 'LineString',
+                'coordinates': coords || []
+              }
+            });
+          }
+        }
+
+        updateSource('true-path-source', pathData.truePath);
+        updateSource('est-path-source', pathData.estPath);
+        updateSource('naive-path-source', pathData.naivePath);
+        updateSource('outage-source', pathData.outagePath);
+      } catch (e) {
+        console.error('Error updating paths:', e);
+      }
+    }
+
+    function setMapStyle(styleName) {
+      if (!map || styleName === currentStyleType) return;
+      currentStyleType = styleName;
+      const url = STYLE_URLS[styleName] || STYLE_URLS.normal;
+      map.setStyle(url);
+    }
+
+    function set3DMode(enable3D) {
+      is3DMode = enable3D;
+      if (!map) return;
+
+      map.easeTo({
+        pitch: is3DMode ? 60 : 0,
+        duration: 600
+      });
+
+      setup3DAndTerrain();
+    }
+
+    function recenterCamera() {
+      autoFollow = true;
+      if (!map) return;
+      map.flyTo({
+        center: [currentLon, currentLat],
+        zoom: 17.5,
+        pitch: is3DMode ? 60 : 0,
+        bearing: currentBearing,
+        duration: 600
+      });
+    }
+
+    function zoomIn() {
+      if (map) map.zoomIn();
+    }
+
+    function zoomOut() {
+      if (map) map.zoomOut();
+    }
+
+    // Auto-initialize when token placeholder is replaced by Android
+    function tryAutoInit() {
+      if (DEFAULT_TOKEN && DEFAULT_TOKEN.indexOf('__') === -1) {
+        initMap(DEFAULT_TOKEN, DEFAULT_LAT, DEFAULT_LON, 17.5, DEFAULT_STYLE, DEFAULT_3D);
+      }
+    }
+
+    // Trigger auto init
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+      tryAutoInit();
+    } else {
+      window.addEventListener('DOMContentLoaded', tryAutoInit);
+    }
+    window.addEventListener('resize', () => { if (map) map.resize(); });
+  </script>
+</body>
+</html>

@@ -22,10 +22,6 @@
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.SIHPro">
 
-        <!-- Google Maps API Key: Injected securely from local.properties (git-ignored) -->
-        <meta-data
-            android:name="com.google.android.geo.API_KEY"
-            android:value="${MAPS_API_KEY}" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -38,6 +34,22 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".ui.auth.LoginActivity"
+            android:exported="false"
+            android:theme="@style/Theme.SIHPro"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".ui.auth.EmailAuthActivity"
+            android:exported="false"
+            android:theme="@style/Theme.SIHPro"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".ui.auth.PhoneAuthActivity"
+            android:exported="false"
+            android:theme="@style/Theme.SIHPro"
+            android:windowSoftInputMode="adjustResize" />
     </application>
 
 </manifest>
