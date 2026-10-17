@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "538390966047",
+    "project_id": "inertiax-7f6b7",
+    "storage_bucket": "inertiax-7f6b7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:538390966047:android:dba82803ba0a9c4a478a2a",
+        "android_client_info": {
+          "package_name": "com.sleepingheads.sihpro"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "538390966047-ng42a1mbgsq0pv9787l6rna18kci1iln.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.sleepingheads.sihpro",
+            "certificate_hash": "2a1ddf27a91168d9ea2c661d47ee95399cc35dcb"
+          }
+        },
+        {
+          "client_id": "538390966047-uatr4ic64n7ec31mdi7m1g158ctik5cr.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD0cAOdsdi3MVMgbDcMjjNq7pvOGPvBRoE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "538390966047-uatr4ic64n7ec31mdi7m1g158ctik5cr.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

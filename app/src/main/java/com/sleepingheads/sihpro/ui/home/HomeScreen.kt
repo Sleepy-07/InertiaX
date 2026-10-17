@@ -35,7 +35,8 @@ fun HomeScreen(
     viewModel: NavigationViewModel,
     onStartDemo: () -> Unit,
     onViewResults: () -> Unit,
-    onViewDiagnostics: () -> Unit
+    onViewDiagnostics: () -> Unit,
+    onLogout: (() -> Unit)? = null
 ) {
     val scrollState = rememberScrollState()
     val availableTrips = viewModel.availableTrips
@@ -153,21 +154,53 @@ fun HomeScreen(
                 else -> "Offline Edge Ready"
             }
             Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(statusColor.copy(alpha = 0.15f))
-                    .border(1.dp, statusColor.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Box(modifier = Modifier.size(7.dp).background(statusColor, CircleShape))
-                Text(
-                    text = statusText,
-                    color = statusColor,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(statusColor.copy(alpha = 0.15f))
+                        .border(1.dp, statusColor.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Box(modifier = Modifier.size(7.dp).background(statusColor, CircleShape))
+                    Text(
+                        text = statusText,
+                        color = statusColor,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                if (onLogout != null) {
+                    val user = remember { com.sleepingheads.sihpro.session.UserSessionManager.getCurrentUser(context) }
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Color(0xFF161E2C))
+                            .border(1.dp, Color(0xFF263345), RoundedCornerShape(20.dp))
+                            .clickable { onLogout() }
+                            .padding(horizontal = 8.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AccountCircle,
+                            contentDescription = "User Profile",
+                            tint = Color(0xFF00E676),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "Logout",
+                            color = Color(0xFFB0BEC5),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
             }
         }
 

@@ -6,6 +6,9 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.compose.ui.platform.LocalContext
+import com.sleepingheads.sihpro.session.UserSessionManager
+import com.sleepingheads.sihpro.ui.auth.LoginScreen
 import com.sleepingheads.sihpro.ui.diagnostics.DiagnosticsScreen
 import com.sleepingheads.sihpro.ui.home.HomeScreen
 import com.sleepingheads.sihpro.ui.results.ResultsScreen
@@ -15,10 +18,22 @@ fun AppNavGraph(
     navController: NavHostController = rememberNavController(),
     sharedNavViewModel: NavigationViewModel = viewModel()
 ) {
+    val context = LocalContext.current
+
     NavHost(
         navController = navController,
-        startDestination = Routes.HOME
+        startDestination = Routes.LOGIN
     ) {
+        composable(Routes.LOGIN) {
+            LoginScreen(
+                onLoginSuccess = {
+                    navController.navigate(Routes.HOME) {
+                        popUpTo(Routes.LOGIN) { inclusive = true }
+                    }
+                }
+            )
+        }
+
         composable(Routes.HOME) {
             HomeScreen(
                 viewModel = sharedNavViewModel,
@@ -30,6 +45,12 @@ fun AppNavGraph(
                 },
                 onViewDiagnostics = {
                     navController.navigate(Routes.DIAGNOSTICS)
+                },
+                onLogout = {
+                    UserSessionManager.logout(context)
+                    navController.navigate(Routes.LOGIN) {
+                        popUpTo(Routes.HOME) { inclusive = true }
+                    }
                 }
             )
         }

@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.sleepingheads.sihpro.network.GeoReckonConnectionState
-import com.sleepingheads.sihpro.ui.navigation.components.GoogleMapView
+import com.sleepingheads.sihpro.ui.navigation.components.MapboxMapView
 import com.sleepingheads.sihpro.ui.navigation.components.TrajectoryView
 
 @Composable
@@ -50,7 +50,7 @@ fun NavigationScreen(
 
     val isBlackout = mode == "DEAD_RECKONING"
     var showRouteMenu by remember { mutableStateOf(false) }
-    var useGoogleMaps by rememberSaveable { mutableStateOf(true) }
+    var useMapboxMap by rememberSaveable { mutableStateOf(true) }
 
     // Colors matching state
     val modeColor = when (mode) {
@@ -65,38 +65,22 @@ fun NavigationScreen(
             .fillMaxSize()
             .background(Color(0xFF0B0E14))
     ) {
-        // 1. Fullscreen Navigation Views
-        // Keep GoogleMapView permanently in the composition so that switching between
-        // the 3D Trajectory Canvas and the Map preserves the loaded map tiles, OpenGL context,
-        // and vehicle camera tracking without reloading or re-zooming.
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    alpha = if (useGoogleMaps) 1f else 0f
-                }
-        ) {
-            GoogleMapView(
+        // 1. Fullscreen Mapbox 3D / Satellite / Normal Navigation View
+        if (useMapboxMap) {
+            MapboxMapView(
                 allSamples = state.allSamples,
                 currentSample = sample,
                 currentSampleIndex = state.currentSampleIndex,
                 metadata = state.metadata,
                 modifier = Modifier.fillMaxSize()
             )
-        }
-
-        // When in 3D Procedural Canvas mode, TrajectoryView overlays on top and intercepts gestures
-        if (!useGoogleMaps) {
-            Box(
+        } else {
+            TrajectoryView(
+                allSamples = state.allSamples,
+                currentSample = sample,
+                metadata = state.metadata,
                 modifier = Modifier.fillMaxSize()
-            ) {
-                TrajectoryView(
-                    allSamples = state.allSamples,
-                    currentSample = sample,
-                    metadata = state.metadata,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
+            )
         }
 
         // 2. Top Header HUD Bar (Back, Route Switcher, Layer Toggle, Diagnostics)
@@ -206,17 +190,17 @@ fun NavigationScreen(
                     }
                     }
 
-                    // View Toggle (Map vs 3D Procedural Canvas)
+                    // View Toggle (Mapbox Map vs 3D Procedural Canvas)
                     IconButton(
-                        onClick = { useGoogleMaps = !useGoogleMaps },
+                        onClick = { useMapboxMap = !useMapboxMap },
                         modifier = Modifier
                             .size(38.dp)
                             .background(Color(0x22FFFFFF), CircleShape)
                     ) {
                         Icon(
-                            imageVector = if (useGoogleMaps) Icons.Default.Layers else Icons.Default.Map,
-                            contentDescription = if (useGoogleMaps) "Switch to 3D Canvas" else "Switch to Google Maps",
-                            tint = if (useGoogleMaps) Color(0xFF00E5FF) else Color(0xFF00E676),
+                            imageVector = if (useMapboxMap) Icons.Default.Layers else Icons.Default.Map,
+                            contentDescription = if (useMapboxMap) "Switch to 3D Canvas" else "Switch to Mapbox Map",
+                            tint = if (useMapboxMap) Color(0xFF00E5FF) else Color(0xFF00E676),
                             modifier = Modifier.size(20.dp)
                         )
                     }
