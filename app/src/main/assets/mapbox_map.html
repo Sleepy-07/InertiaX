@@ -77,28 +77,28 @@
     }
     .vehicle-pulse {
       position: absolute;
-      width: 46px;
-      height: 46px;
+      width: 48px;
+      height: 48px;
       border-radius: 50%;
-      background: rgba(0, 229, 255, 0.25);
-      border: 2px solid #00E5FF;
-      animation: pulse 1.8s infinite ease-out;
+      background: rgba(37, 99, 235, 0.25);
+      border: 2px solid rgba(37, 99, 235, 0.6);
+      animation: pulse 2.0s infinite ease-out;
     }
     .vehicle-pulse.blackout {
-      background: rgba(255, 145, 0, 0.25);
-      border-color: #FF9100;
+      background: rgba(234, 88, 12, 0.25);
+      border-color: #EA580C;
     }
     @keyframes pulse {
-      0% { transform: scale(0.6); opacity: 1; }
+      0% { transform: scale(0.7); opacity: 1; }
       100% { transform: scale(1.6); opacity: 0; }
     }
     .vehicle-puck {
       width: 32px;
       height: 32px;
       border-radius: 50%;
-      background: #0B0E14;
-      border: 3px solid #00E5FF;
-      box-shadow: 0 0 12px rgba(0, 229, 255, 0.8), 0 4px 8px rgba(0,0,0,0.5);
+      background: #2563EB;
+      border: 3px solid #FFFFFF;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -106,8 +106,9 @@
       z-index: 2;
     }
     .vehicle-puck.blackout {
-      border-color: #FF9100;
-      box-shadow: 0 0 12px rgba(255, 145, 0, 0.8), 0 4px 8px rgba(0,0,0,0.5);
+      background: #EA580C;
+      border-color: #FFFFFF;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
     }
     .vehicle-arrow {
       width: 0;
@@ -115,7 +116,7 @@
       border-left: 6px solid transparent;
       border-right: 6px solid transparent;
       border-bottom: 12px solid #FFFFFF;
-      transform: translateY(-2px);
+      transform: translateY(-1px);
     }
 
     /* Naive Drift Marker */
@@ -261,6 +262,11 @@
           antialias: true
         });
 
+        // Disable default double-click-zoom so double clicking cleanly drops a pin
+        if (map.doubleClickZoom) {
+          map.doubleClickZoom.disable();
+        }
+
         map.on('error', (e) => {
           if (e && e.error && e.error.message) {
             console.warn("Mapbox warning:", e.error.message);
@@ -269,6 +275,18 @@
 
         // Break auto-follow when user manually drags the map
         map.on('dragstart', () => { autoFollow = false; });
+
+        // Double-click to place destination pin
+        map.on('dblclick', (e) => {
+          placeDestinationMarker(e.lngLat.lng, e.lngLat.lat);
+          try {
+            if (window.AndroidBridge && window.AndroidBridge.onMapDoubleClicked) {
+              window.AndroidBridge.onMapDoubleClicked(e.lngLat.lat, e.lngLat.lng);
+            }
+          } catch(err) {
+            console.error("AndroidBridge error:", err);
+          }
+        });
 
         map.on('load', () => {
           hideLoader();
@@ -608,6 +626,102 @@
         bearing: currentBearing,
         duration: 600
       });
+    }
+
+    let destMarker = null;
+    function placeDestinationMarker(lon, lat) {
+      if (!map) return;
+      if (!destMarker) {
+        const pin = document.createElement('div');
+        pin.style.width = '36px';
+        pin.style.height = '44px';
+        pin.style.cursor = 'pointer';
+        pin.style.filter = 'drop-shadow(0 4px 6px rgba(0,0,0,0.35))';
+        pin.innerHTML = `
+          <svg width="36" height="44" viewBox="0 0 24 28" fill="none">
+            <path d="M12 0C5.37 0 0 5.37 0 12c0 8.5 12 16 12 16s12-7.5 12-16c0-6.63-5.37-12-12-12z" fill="#EA4335"/>
+            <circle cx="12" cy="11" r="4.5" fill="#FFFFFF"/>
+          </svg>
+        `;
+        destMarker = new mapboxgl.Marker({ element: pin, anchor: 'bottom' })
+          .setLngLat([lon, lat])
+          .addTo(map);
+      } else {
+        destMarker.setLngLat([lon, lat]);
+      }
+    }
+
+    function setNavigationRoute(routeGeoJsonStr, destLat, destLon) {
+      if (!map) return;
+      try {
+        if (!destLat || !destLon || isNaN(destLat) || isNaN(destLon)) {
+          clearNavigationRoute();
+          return;
+        }
+        placeDestinationMarker(destLon, destLat);
+
+        if (!routeGeoJsonStr) return;
+        const geojson = (typeof routeGeoJsonStr === 'string') ? JSON.parse(routeGeoJsonStr) : routeGeoJsonStr;
+
+        if (!map.getSource('nav-route-source')) {
+          map.addSource('nav-route-source', {
+            type: 'geojson',
+            data: geojson
+          });
+
+          // Outer casing (Dark Royal Blue Google-style casing)
+          map.addLayer({
+            id: 'nav-route-casing',
+            type: 'line',
+            source: 'nav-route-source',
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: {
+              'line-color': '#1D4ED8',
+              'line-width': 9,
+              'line-opacity': 0.85
+            }
+          });
+
+          // Inner line (Vibrant Electric Blue Google Maps style)
+          map.addLayer({
+            id: 'nav-route-inner',
+            type: 'line',
+            source: 'nav-route-source',
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: {
+              'line-color': '#3B82F6',
+              'line-width': 5.5,
+              'line-opacity': 0.98
+            }
+          });
+        } else {
+          map.getSource('nav-route-source').setData(geojson);
+        }
+
+        // Fit map bounds to show route clearly
+        if (geojson.coordinates && geojson.coordinates.length > 0) {
+          const bounds = new mapboxgl.LngLatBounds();
+          geojson.coordinates.forEach(coord => bounds.extend(coord));
+          bounds.extend([destLon, destLat]);
+          bounds.extend([currentLon, currentLat]);
+          map.fitBounds(bounds, { padding: { top: 120, bottom: 260, left: 50, right: 50 }, duration: 900 });
+        }
+      } catch (e) {
+        console.error("Error setting navigation route:", e);
+      }
+    }
+
+    function clearNavigationRoute() {
+      if (destMarker) {
+        destMarker.remove();
+        destMarker = null;
+      }
+      if (map && map.getSource('nav-route-source')) {
+        map.getSource('nav-route-source').setData({
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: [] }
+        });
+      }
     }
 
     function zoomIn() {

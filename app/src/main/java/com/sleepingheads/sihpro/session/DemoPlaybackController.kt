@@ -97,6 +97,52 @@ class DemoPlaybackController(
         }
     }
 
+    fun initLiveOfflineSession(
+        title: String = "100% On-Device Neural DR",
+        initialLat: Double? = null,
+        initialLon: Double? = null
+    ) {
+        playbackJob?.cancel()
+        _state.update {
+            it.copy(
+                isPlaying = true,
+                allSamples = emptyList(),
+                currentSampleIndex = 0,
+                currentSample = null,
+                metadata = TripMetadata(
+                    tripId = "live_offline_dr",
+                    title = title,
+                    scenarioType = "Real-Time On-Device Dead Reckoning",
+                    badge = "REALTIME AI",
+                    description = "100% Real-time hardware IMU & Invariant EKF running directly on device",
+                    sampleRateHz = 10,
+                    durationSec = 0.0,
+                    sampleCount = 0,
+                    outageStartSec = 0.0,
+                    outageEndSec = 0.0,
+                    outageDurationSec = 0.0,
+                    outageDistanceM = 0.0,
+                    endpointErrorM = 0.0,
+                    rmsErrorM = 0.0,
+                    maxErrorM = 0.0,
+                    driftPercent = 0.0,
+                    isroTargetPercent = 10.0,
+                    isroPassed = true,
+                    originLat = initialLat ?: 12.9715987,
+                    originLon = initialLon ?: 77.5945627,
+                    modelVersion = "KinoNet-R2 (On-Device ONNX)",
+                    dataType = "Real-Time Sensor Telemetry"
+                ),
+                progress = 0f,
+                elapsedSec = 0f,
+                isCompleted = false
+            )
+        }
+    }
+
+    val isLiveSession: Boolean
+        get() = _state.value.metadata?.tripId == "aws_live_cloud" || _state.value.metadata?.tripId == "live_offline_dr"
+
     fun feedLiveSample(sample: DemoSample, history: List<DemoSample>) {
         _state.update {
             val isDefaultBangalore = (it.metadata?.originLat ?: 0.0) == 12.9715987 && (it.metadata?.originLon ?: 0.0) == 77.5945627
@@ -122,6 +168,7 @@ class DemoPlaybackController(
     }
 
     fun start() {
+        if (isLiveSession) return // Live sensor navigation runs in real-time without simulation loops
         val samples = _state.value.allSamples
         if (samples.isEmpty()) return
         if (playbackJob?.isActive == true && _state.value.isPlaying) return

@@ -123,11 +123,13 @@ fun LoginScreen(
                         isGoogleLoading = false
                         if (authTask.isSuccessful) {
                             val user = authTask.result?.user
+                            val gPhoto = account?.photoUrl?.toString() ?: user?.photoUrl?.toString()
                             UserSessionManager.saveSession(
                                 context = context,
                                 name = user?.displayName ?: gName,
                                 identifier = user?.email ?: gEmail,
-                                provider = AuthProviderType.GOOGLE
+                                provider = AuthProviderType.GOOGLE,
+                                photoUrl = gPhoto
                             )
                             Toast.makeText(context, "Welcome, ${user?.displayName ?: gName}!", Toast.LENGTH_SHORT).show()
                             onLoginSuccess()
@@ -360,8 +362,10 @@ fun LoginScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .verticalScroll(rememberScrollState())
                         .padding(horizontal = 24.dp)
-                        .padding(top = 28.dp, bottom = 24.dp),
+                        .padding(top = 24.dp, bottom = 16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     // App Brand: "GEOReckon"

@@ -5,9 +5,13 @@ import android.location.Location
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.sleepingheads.sihpro.BuildConfig
 import com.sleepingheads.sihpro.data.model.DemoSample
 import com.sleepingheads.sihpro.data.model.DemoTripInfo
 import com.sleepingheads.sihpro.data.replay.DemoTripRepository
+import com.sleepingheads.sihpro.data.repository.DestinationInfo
+import com.sleepingheads.sihpro.data.repository.NavRoute
+import com.sleepingheads.sihpro.data.repository.RoutingService
 import com.sleepingheads.sihpro.engine.GeoReckonEngine
 import com.sleepingheads.sihpro.engine.SensorBridge
 import com.sleepingheads.sihpro.network.*
@@ -87,6 +91,101 @@ class NavigationViewModel(private val app: Application) : AndroidViewModel(app) 
     val lastError: StateFlow<ErrorResponse?> = socketClient.lastError
     val lastPosition: StateFlow<PositionResponse?> = socketClient.lastPosition
     val lastCalibration: StateFlow<CalibrateDoneResponse?> = socketClient.lastCalibration
+
+    // ── Active Navigation Destination & Shortest/Fastest Driving Route ──
+    private val _customOrigin = MutableStateFlow<DestinationInfo?>(null)
+    val customOrigin: StateFlow<DestinationInfo?> = _customOrigin.asStateFlow()
+
+    private val _activeDestination = MutableStateFlow<DestinationInfo?>(null)
+    val activeDestination: StateFlow<DestinationInfo?> = _activeDestination.asStateFlow()
+
+    private val _activeRoute = MutableStateFlow<NavRoute?>(null)
+    val activeRoute: StateFlow<NavRoute?> = _activeRoute.asStateFlow()
+
+    private val _isCalculatingRoute = MutableStateFlow(false)
+    val isCalculatingRoute: StateFlow<Boolean> = _isCalculatingRoute.asStateFlow()
+
+    private val mapboxToken: String = try {
+        BuildConfig.MAPBOX_ACCESS_TOKEN.ifEmpty { BuildConfig.MAPS_API_KEY }
+    } catch (_: Exception) { "" }
+
+    fun setCustomOrigin(origin: DestinationInfo?) {
+        _customOrigin.value = origin
+        val dest = _activeDestination.value
+        if (dest != null) {
+            calculateRouteTo(dest.lat, dest.lon)
+        }
+    }
+
+    fun setDestination(dest: DestinationInfo) {
+        _activeDestination.value = dest
+        calculateRouteTo(dest.lat, dest.lon)
+    }
+
+    fun setDestinationFromCoordinates(lat: Double, lon: Double) {
+        viewModelScope.launch {
+            _isCalculatingRoute.value = true
+            val name = RoutingService.reverseGeocode(lat, lon, mapboxToken)
+            val dest = DestinationInfo(name = name, lat = lat, lon = lon)
+            _activeDestination.value = dest
+            calculateRouteTo(lat, lon)
+        }
+    }
+
+    fun swapOriginAndDestination() {
+        val dest = _activeDestination.value ?: return
+        val sample = playbackState.value.currentSample
+        val origin = controller.originCoordinates
+        val currLat = sample?.estLat?.takeIf { !it.isNaN() && it != 0.0 } ?: origin?.first ?: 12.9715987
+        val currLon = sample?.estLon?.takeIf { !it.isNaN() && it != 0.0 } ?: origin?.second ?: 77.5945627
+
+        val oldOrigin = _customOrigin.value ?: DestinationInfo("Current Location", currLat, currLon)
+        _customOrigin.value = dest
+        _activeDestination.value = oldOrigin
+        calculateRouteTo(oldOrigin.lat, oldOrigin.lon)
+    }
+
+    fun clearDestination() {
+        _activeDestination.value = null
+        _activeRoute.value = null
+        _customOrigin.value = null
+        _isCalculatingRoute.value = false
+    }
+
+    fun searchPlaces(query: String, onResult: (List<DestinationInfo>) -> Unit) {
+        viewModelScope.launch {
+            val currPos = playbackState.value.currentSample
+            val results = RoutingService.searchPlaces(
+                query = query,
+                proximityLat = currPos?.estLat,
+                proximityLon = currPos?.estLon,
+                mapboxToken = mapboxToken
+            )
+            onResult(results)
+        }
+    }
+
+    private fun calculateRouteTo(destLat: Double, destLon: Double) {
+        viewModelScope.launch {
+            _isCalculatingRoute.value = true
+            val sample = playbackState.value.currentSample
+            val origin = controller.originCoordinates
+            val custom = _customOrigin.value
+
+            val startLat = custom?.lat ?: sample?.estLat?.takeIf { !it.isNaN() && it != 0.0 } ?: origin?.first ?: 12.9715987
+            val startLon = custom?.lon ?: sample?.estLon?.takeIf { !it.isNaN() && it != 0.0 } ?: origin?.second ?: 77.5945627
+
+            val route = RoutingService.fetchRoute(
+                startLat = startLat,
+                startLon = startLon,
+                destLat = destLat,
+                destLon = destLon,
+                mapboxToken = mapboxToken
+            )
+            _activeRoute.value = route
+            _isCalculatingRoute.value = false
+        }
+    }
 
     private val liveSampleHistory = mutableListOf<DemoSample>()
     private var pingJob: Job? = null
@@ -262,7 +361,7 @@ class NavigationViewModel(private val app: Application) : AndroidViewModel(app) 
         // Clean slate for new live driving session
         offlineEngine.reset()
         val engineName = offlineEngine.activeModelEngine
-        controller.initLiveCloudSession(
+        controller.initLiveOfflineSession(
             title = "100% On-Device Edge • $engineName"
         )
         offlineSensorBridge.start()
@@ -533,6 +632,10 @@ class NavigationViewModel(private val app: Application) : AndroidViewModel(app) 
     }
 
     fun togglePlayPause() {
+        if (_isLiveOfflineMode.value || _isLiveCloudMode.value) {
+            // Realtime tracking modes operate directly on live device sensors; no playback loop
+            return
+        }
         if (playbackState.value.isPlaying) {
             controller.pause()
         } else {
@@ -544,7 +647,7 @@ class NavigationViewModel(private val app: Application) : AndroidViewModel(app) 
         if (_isLiveOfflineMode.value) {
             offlineEngine.reset()
             liveSampleHistory.clear()
-            controller.initLiveCloudSession("100% On-Device Edge • ${offlineEngine.activeModelEngine}")
+            controller.initLiveOfflineSession("100% On-Device Edge • ${offlineEngine.activeModelEngine}")
         } else if (_isLiveCloudMode.value) {
             livePipeline.reset()
             liveSampleHistory.clear()
