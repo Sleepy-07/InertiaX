@@ -27,16 +27,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.sleepingheads.sihpro.ui.theme.ThemeManager.init(this)
 
         // Request runtime GPS permissions if not yet granted
         checkAndRequestLocationPermissions()
 
         enableEdgeToEdge()
         setContent {
-            SIHProTheme(darkTheme = true) {
+            val isDark = com.sleepingheads.sihpro.ui.theme.ThemeManager.isDarkTheme.value
+            SIHProTheme(darkTheme = isDark) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = Color(0xFF0B0E14)
+                    color = if (isDark) Color(0xFF0B0E14) else Color(0xFFF8FAFC)
                 ) {
                     AppNavGraph()
                 }

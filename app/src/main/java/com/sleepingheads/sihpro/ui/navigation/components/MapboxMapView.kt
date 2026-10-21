@@ -24,12 +24,15 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.sleepingheads.sihpro.BuildConfig
 import com.sleepingheads.sihpro.data.model.DemoSample
 import com.sleepingheads.sihpro.data.model.TripMetadata
+import com.sleepingheads.sihpro.data.repository.DestinationInfo
+import com.sleepingheads.sihpro.data.repository.NavRoute
 import org.json.JSONArray
 
 enum class MapboxStyle(val id: String, val label: String) {
@@ -45,6 +48,10 @@ fun MapboxMapView(
     currentSample: DemoSample?,
     currentSampleIndex: Int = 0,
     metadata: TripMetadata?,
+    activeRoute: NavRoute? = null,
+    activeDestination: DestinationInfo? = null,
+    onDestinationPinned: ((Double, Double) -> Unit)? = null,
+    bottomPadding: Dp = 270.dp,
     modifier: Modifier = Modifier
 ) {
     val activeSample = currentSample ?: allSamples.lastOrNull() ?: remember {
@@ -91,7 +98,7 @@ fun MapboxMapView(
 
     val isBlackout = activeSample.mode == "DEAD_RECKONING"
 
-    var selectedStyle by remember { mutableStateOf(MapboxStyle.NORMAL) }
+    var selectedStyle by remember { mutableStateOf(MapboxStyle.SATELLITE) }
     var is3DMode by remember { mutableStateOf(true) }
     var isWebMapReady by remember { mutableStateOf(false) }
 
@@ -172,7 +179,7 @@ fun MapboxMapView(
     }
 
     // Push trip path geometries when map is ready or sample data changes
-    LaunchedEffect(isWebMapReady, metadata?.tripId) {
+    LaunchedEffect(isWebMapReady, metadata?.tripId, allSamples.size / 5) {
         if (!isWebMapReady || webViewRef == null) return@LaunchedEffect
 
         val js = """
@@ -185,6 +192,24 @@ fun MapboxMapView(
         """.trimIndent()
         webViewRef?.evaluateJavascript(js, null)
     }
+
+    // Push or clear navigation driving route
+    LaunchedEffect(isWebMapReady, activeRoute, activeDestination) {
+        if (!isWebMapReady || webViewRef == null) return@LaunchedEffect
+        if (activeDestination != null && activeRoute != null) {
+            val escapedGeoJson = activeRoute.geoJsonString.replace("'", "\\'")
+            val js = "setNavigationRoute('$escapedGeoJson', ${activeDestination.lat}, ${activeDestination.lon});"
+            webViewRef?.evaluateJavascript(js, null)
+        } else if (activeDestination != null) {
+            val js = "setNavigationRoute(null, ${activeDestination.lat}, ${activeDestination.lon});"
+            webViewRef?.evaluateJavascript(js, null)
+        } else {
+            val js = "clearNavigationRoute();"
+            webViewRef?.evaluateJavascript(js, null)
+        }
+    }
+
+    val currentOnDestinationPinned by rememberUpdatedState(onDestinationPinned)
 
     Box(modifier = modifier.fillMaxSize()) {
         // ── Hardware-Accelerated Mapbox GL JS WebView ────────────────────────
@@ -210,6 +235,15 @@ fun MapboxMapView(
                         builtInZoomControls = false
                         displayZoomControls = false
                     }
+
+                    addJavascriptInterface(object {
+                        @android.webkit.JavascriptInterface
+                        fun onMapDoubleClicked(lat: Double, lon: Double) {
+                            post {
+                                currentOnDestinationPinned?.invoke(lat, lon)
+                            }
+                        }
+                    }, "AndroidBridge")
 
                     webChromeClient = object : WebChromeClient() {
                         override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
@@ -268,128 +302,74 @@ fun MapboxMapView(
             modifier = Modifier.fillMaxSize()
         )
 
-        // ── Top-Right Map Controls: Normal/Satellite & 3D/2D (Snapchat style) ──
+        // ── Floating Action Buttons (Right side of map down above bottom sheet: View Type, 3D, Recenter) ──
         Column(
             modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 110.dp, end = 16.dp),
+                .align(Alignment.BottomEnd)
+                .padding(bottom = bottomPadding, end = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
-            horizontalAlignment = Alignment.End
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Style Selector: Normal vs Satellite vs Dark
+            // 1. Layer switcher FAB (Satellite vs Normal)
             Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = Color(0xDD121722),
-                border = BorderStroke(1.dp, Color(0x3300E5FF)),
-                shadowElevation = 8.dp
-            ) {
-                Row(
-                    modifier = Modifier.padding(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    MapboxStyle.values().forEach { style ->
-                        val isSelected = selectedStyle == style
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(if (isSelected) Color(0xFF00E5FF) else Color.Transparent)
-                                .clickable {
-                                    selectedStyle = style
-                                    webViewRef?.evaluateJavascript("setMapStyle('${style.id}');", null)
-                                }
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = style.label,
-                                color = if (isSelected) Color(0xFF0B0E14) else Color(0xFFCFD8DC),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-            }
-
-            // 3D Perspective Toggle Button (Snap Map 3D Buildings & Terrain)
-            FloatingActionButton(
                 onClick = {
-                    is3DMode = !is3DMode
-                    webViewRef?.evaluateJavascript("set3DMode($is3DMode);", null)
+                    selectedStyle = if (selectedStyle == MapboxStyle.SATELLITE) MapboxStyle.NORMAL else MapboxStyle.SATELLITE
+                    webViewRef?.evaluateJavascript("setMapStyle('${selectedStyle.id}');", null)
                 },
-                modifier = Modifier.size(46.dp),
                 shape = CircleShape,
-                containerColor = if (is3DMode) Color(0xFF00E5FF) else Color(0xEE161F2E),
-                contentColor = if (is3DMode) Color(0xFF0B0E14) else Color.White
+                color = Color.White,
+                shadowElevation = 5.dp,
+                modifier = Modifier.size(46.dp)
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = if (is3DMode) "3D" else "2D",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Black
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Layers,
+                        contentDescription = "Map Style",
+                        tint = Color(0xFF0284C7),
+                        modifier = Modifier.size(22.dp)
                     )
                 }
             }
 
-            // Recenter Camera Button
-            FloatingActionButton(
+            // 2. 3D perspective FAB
+            Surface(
+                onClick = {
+                    is3DMode = !is3DMode
+                    webViewRef?.evaluateJavascript("set3DMode($is3DMode);", null)
+                },
+                shape = CircleShape,
+                color = Color.White,
+                shadowElevation = 5.dp,
+                modifier = Modifier.size(46.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = if (is3DMode) "3D" else "2D",
+                        color = Color(0xFF0F172A),
+                        fontWeight = FontWeight.Black,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+
+            // 3. Recenter camera FAB (Blue crosshair)
+            Surface(
                 onClick = {
                     webViewRef?.evaluateJavascript("recenterCamera();", null)
                 },
-                modifier = Modifier.size(46.dp),
                 shape = CircleShape,
-                containerColor = Color(0xEE161F2E),
-                contentColor = Color(0xFF00E676)
+                color = Color.White,
+                shadowElevation = 5.dp,
+                modifier = Modifier.size(46.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.MyLocation,
-                    contentDescription = "Recenter Camera",
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            // Zoom In / Out
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = Color(0xEE161F2E),
-                border = BorderStroke(1.dp, Color(0x22FFFFFF)),
-                shadowElevation = 6.dp
-            ) {
-                Column {
-                    IconButton(
-                        onClick = { webViewRef?.evaluateJavascript("zoomIn();", null) },
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = "Zoom In", tint = Color.White, modifier = Modifier.size(18.dp))
-                    }
-                    HorizontalDivider(modifier = Modifier.width(40.dp), thickness = 1.dp, color = Color(0x22FFFFFF))
-                    IconButton(
-                        onClick = { webViewRef?.evaluateJavascript("zoomOut();", null) },
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Icon(Icons.Default.Remove, contentDescription = "Zoom Out", tint = Color.White, modifier = Modifier.size(18.dp))
-                    }
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.MyLocation,
+                        contentDescription = "Recenter Camera",
+                        tint = Color(0xFF0284C7),
+                        modifier = Modifier.size(22.dp)
+                    )
                 }
-            }
-        }
-
-        // ── Bottom Map Legend Card ───────────────────────────────────────────
-        Row(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(start = 16.dp, bottom = 180.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color(0xDD12161F))
-                .border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(12.dp))
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            LegendItem(color = if (isBlackout) Color(0xFFFF9100) else Color(0xFF00E5FF), label = "Vehicle Car")
-            LegendItem(color = Color(0xFFEF4444), label = "Naive INS")
-            LegendItem(color = Color(0xFF00E676), label = "True GPS")
-            if (outagePathJson.length > 5) {
-                LegendItem(color = Color(0xFFE040FB), label = "Outage Zone")
             }
         }
     }
